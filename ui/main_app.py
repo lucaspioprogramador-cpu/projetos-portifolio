@@ -11,6 +11,7 @@ import time
 from datetime import datetime, timedelta
 import pytz
 import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 from binance.client import Client
 from binance import ThreadedWebsocketManager
 from core.execution import executar_ordem_simulada, apply_simulated_fill
@@ -1116,6 +1117,16 @@ with _filtro_cols[0]:
 with _filtro_cols[1]:
     _mostrar_sinais = st.toggle("Mostrar sinais", value=True)
 
+_chart_controls = st.columns([1.25, 1, 1, 1])
+with _chart_controls[0]:
+    _tipo_grafico = st.selectbox("Visualização", ["Candles", "Linha"], label_visibility="collapsed")
+with _chart_controls[1]:
+    _mostrar_trades = st.toggle("Trades", value=True)
+with _chart_controls[2]:
+    _mostrar_medias = st.toggle("Médias móveis", value=True)
+with _chart_controls[3]:
+    _mostrar_bollinger = st.toggle("Bandas de Bollinger", value=False)
+
 # Calcula o `since` baseado no filtro escolhido
 _now = now_brazil()
 _since_map = {
@@ -1150,22 +1161,101 @@ except Exception as e:
 if not main_df.empty:
     df = main_df.copy()
     df['timestamp'] = pd.to_datetime(df['timestamp'])
-    df = df.dropna(subset=['timestamp', 'close'])
+    df = df.dropna(subset=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
+    df = df.sort_values('timestamp').drop_duplicates('timestamp').reset_index(drop=True)
 
     if not df.empty:
-        fig = go.Figure()
-        # Linha de preço
-        fig.add_trace(go.Scatter(
-            x=df['timestamp'], y=df['close'],
-            mode='lines',
-            line=dict(color='#26a69a', width=2),
-            name='Preco',
-            hovertemplate='%{x}<br>Preco: %{y:,.2f}<extra></extra>',
-        ))
+        _preco_inicial = float(df['close'].iloc[0])
+        _preco_atual = float(df['close'].iloc[-1])
+        _variacao_periodo = ((_preco_atual / _preco_inicial) - 1) * 100 if _preco_inicial else 0.0
+        _metric_cols = st.columns(4)
+        _metric_cols[0].metric("Último preço", f"{_preco_atual:,.4f}")
+        _metric_cols[1].metric("Variação no período", f"{_variacao_periodo:+.2f}%")
+        _metric_cols[2].metric("Máxima", f"{df['high'].max():,.4f}")
+        _metric_cols[3].metric("Mínima", f"{df['low'].min():,.4f}")
+
+        fig = make_subplots(
+            rows=3, cols=1, shared_xaxes=True, vertical_spacing=0.035,
+            row_heights=[0.62, 0.20, 0.18],
+            subplot_titles=("Preço", "Volume", "RSI (14)"),
+        )
+        if _tipo_grafico == "Candles":
+            fig.add_trace(go.Candlestick(
+                x=df['timestamp'], open=df['open'], high=df['high'],
+                low=df['low'], close=df['close'], name='OHLC',
+                increasing_line_color='#2dd4a7', decreasing_line_color='#ff647c',
+                increasing_fillcolor='rgba(45,212,167,0.72)',
+                decreasing_fillcolor='rgba(255,100,124,0.72)',
+                whiskerwidth=0.45,
+                hoverlabel=dict(namelength=0),
+            ), row=1, col=1)
+        else:
+            fig.add_trace(go.Scatter(
+                x=df['timestamp'], y=df['close'], mode='lines',
+                line=dict(color='#38d9c0', width=2.2), fill='tozeroy',
+                fillcolor='rgba(56,217,192,0.08)', name='Fechamento',
+                hovertemplate='%{x|%d/%m %H:%M}<br>Fechamento: %{y:,.4f}<extra></extra>',
+            ), row=1, col=1)
+
+        _volume_colors = [
+            '#2dd4a7' if close >= open_ else '#ff647c'
+            for open_, close in zip(df['open'], df['close'])
+        ]
+        fig.add_trace(go.Bar(
+            x=df['timestamp'], y=df['volume'], name='Volume',
+            marker_color=_volume_colors, opacity=0.72,
+            hovertemplate='%{x|%d/%m %H:%M}<br>Volume: %{y:,.4g}<extra></extra>',
+        ), row=2, col=1)
+
+        try:
+            _chart_features = gerar_features_melhorada(df)
+            if not _chart_features.empty:
+                fig.add_trace(go.Scatter(
+                    x=_chart_features['timestamp'], y=_chart_features['rsi'],
+                    mode='lines', name='RSI 14',
+                    line=dict(color='#b794f6', width=1.7),
+                    hovertemplate='%{x|%d/%m %H:%M}<br>RSI: %{y:.1f}<extra></extra>',
+                ), row=3, col=1)
+        except (KeyError, ValueError, TypeError) as e:
+            logger.warning("Não foi possível calcular RSI do gráfico: %s", e)
+
+        if _mostrar_medias or _mostrar_bollinger:
+            _ma20 = df['close'].rolling(20, min_periods=1).mean()
+            _ma50 = df['close'].rolling(50, min_periods=1).mean()
+            if _mostrar_medias:
+                fig.add_trace(go.Scatter(
+                    x=df['timestamp'], y=_ma20, mode='lines', name='MM 20',
+                    line=dict(color='#ffd166', width=1.3),
+                    hovertemplate='MM 20: %{y:,.4f}<extra></extra>',
+                ), row=1, col=1)
+                fig.add_trace(go.Scatter(
+                    x=df['timestamp'], y=_ma50, mode='lines', name='MM 50',
+                    line=dict(color='#7aa2ff', width=1.3),
+                    hovertemplate='MM 50: %{y:,.4f}<extra></extra>',
+                ), row=1, col=1)
+            if _mostrar_bollinger:
+                _bb_mid = df['close'].rolling(20, min_periods=1).mean()
+                _bb_std = df['close'].rolling(20, min_periods=2).std().fillna(0)
+                _bb_upper = _bb_mid + 2 * _bb_std
+                _bb_lower = _bb_mid - 2 * _bb_std
+                fig.add_trace(go.Scatter(
+                    x=df['timestamp'], y=_bb_upper, mode='lines', name='Bollinger sup.',
+                    line=dict(color='rgba(167,139,250,0.7)', width=1, dash='dot'),
+                    hovertemplate='Banda sup.: %{y:,.4f}<extra></extra>',
+                ), row=1, col=1)
+                fig.add_trace(go.Scatter(
+                    x=df['timestamp'], y=_bb_lower, mode='lines', name='Bollinger inf.',
+                    line=dict(color='rgba(167,139,250,0.7)', width=1, dash='dot'),
+                    fill='tonexty', fillcolor='rgba(167,139,250,0.06)',
+                    hovertemplate='Banda inf.: %{y:,.4f}<extra></extra>',
+                ), row=1, col=1)
+
+        fig.add_hline(y=70, line_dash='dot', line_color='rgba(255,100,124,0.55)', row=3, col=1)
+        fig.add_hline(y=30, line_dash='dot', line_color='rgba(45,212,167,0.55)', row=3, col=1)
 
         # Trades reais do banco — compras e vendas executadas pelo bot
         try:
-            _trades_df = get_trades(symbol=symbol, since=_since)
+            _trades_df = get_trades(symbol=symbol, since=_since) if _mostrar_trades else pd.DataFrame()
             if not _trades_df.empty:
                 _compras = _trades_df[_trades_df['tipo'] == 'COMPRA']
                 _vendas  = _trades_df[_trades_df['tipo'] == 'VENDA']
@@ -1190,7 +1280,7 @@ if not main_df.empty:
                             'Qtd: %{customdata[0]:.4f}<br>'
                             'Valor: %{customdata[1]:,.2f}<extra></extra>'
                         ),
-                    ))
+                    ), row=1, col=1)
 
                 if not _vendas.empty:
                     _vdf = _vendas.copy()
@@ -1216,24 +1306,7 @@ if not main_df.empty:
                             'Valor: %{customdata[1]:,.2f}<br>'
                             'Lucro: %{customdata[2]:,.2f} (%{customdata[3]:.2f}%)<extra></extra>'
                         ),
-                    ))
-
-                # Conecta pares compra-venda com linha tracejada
-                _c_times  = _compras['timestamp'].tolist()
-                _v_times  = _vendas['timestamp'].tolist()
-                _c_prices = _compras['preco_execucao'].tolist()
-                _v_prices = _vendas['preco_execucao'].tolist()
-                for i in range(min(len(_c_times), len(_v_times))):
-                    lucro_val = _vendas.iloc[i]['lucro'] if i < len(_vendas) else 0
-                    cor_linha = '#26a69a' if (lucro_val or 0) >= 0 else '#ef5350'
-                    fig.add_trace(go.Scatter(
-                        x=[_c_times[i], _v_times[i]],
-                        y=[_c_prices[i], _v_prices[i]],
-                        mode='lines',
-                        line=dict(color=cor_linha, width=1, dash='dot'),
-                        showlegend=False,
-                        hoverinfo='skip',
-                    ))
+                    ), row=1, col=1)
 
         except Exception as e:
             logger.warning("Erro ao carregar trades para grafico: %s", e)
@@ -1292,7 +1365,7 @@ if not main_df.empty:
                             ),
                             name='Compra',
                             hovertemplate='COMPRA<br>%{x}<br>%{y:,.2f}<extra></extra>',
-                        ))
+                        ), row=1, col=1)
 
                     if _sells:
                         _sx, _sy = zip(*_sells)
@@ -1307,7 +1380,7 @@ if not main_df.empty:
                             ),
                             name='Venda',
                             hovertemplate='VENDA<br>%{x}<br>%{y:,.2f}<extra></extra>',
-                        ))
+                        ), row=1, col=1)
 
                 try:
                     usar_melhorada = st.session_state.get('usar_estrategia_melhorada', True)
@@ -1491,46 +1564,47 @@ if not main_df.empty:
         except Exception as e:
             logger.warning("Erro ao processar sinais do grafico: %s", e)
 
-        _y_min = df['close'].min()
-        _y_max = df['close'].max()
-        _y_pad = (_y_max - _y_min) * 0.08
+        _y_min = float(df['low'].min())
+        _y_max = float(df['high'].max())
+        _y_span = _y_max - _y_min
+        _y_pad = _y_span * 0.06 if _y_span else max(abs(_y_max) * 0.005, 0.01)
         fig.update_layout(
+            template='plotly_dark',
             paper_bgcolor='rgba(0,0,0,0)',
-            plot_bgcolor='rgba(15,20,25,1)',
-            font_color='white',
-            xaxis=dict(
-                showgrid=True,
-                gridcolor='rgba(255,255,255,0.05)',
-                rangeslider=dict(visible=False),
-                rangeselector=dict(
-                    buttons=[
-                        dict(count=50,  label='50c',  step='minute', stepmode='backward'),
-                        dict(count=100, label='100c', step='minute', stepmode='backward'),
-                        dict(count=200, label='200c', step='minute', stepmode='backward'),
-                        dict(label='Tudo', step='all'),
-                    ],
-                    bgcolor='rgba(255,255,255,0.05)',
-                    activecolor='#26a69a',
-                    font=dict(color='white'),
-                ),
+            plot_bgcolor='#0b1220',
+            font=dict(color='#dbe5f0', family='Inter, sans-serif', size=12),
+            height=760,
+            margin=dict(l=12, r=24, t=48, b=20),
+            legend=dict(
+                orientation='h', yanchor='bottom', y=1.02,
+                xanchor='left', x=0, bgcolor='rgba(0,0,0,0)',
+                font=dict(size=11),
             ),
-            yaxis=dict(
-                showgrid=True,
-                gridcolor='rgba(255,255,255,0.05)',
-                range=[_y_min - _y_pad, _y_max + _y_pad],
-                tickformat=',.2f',
-                side='right',
-            ),
-            margin=dict(l=0, r=60, t=10, b=0),
-            legend=dict(bgcolor='rgba(0,0,0,0)'),
             hovermode='x unified',
+            hoverlabel=dict(bgcolor='#111827', bordercolor='#334155', font_color='#f8fafc'),
+            showlegend=True,
+            xaxis_rangeslider_visible=False,
         )
+        fig.update_xaxes(showgrid=True, gridcolor='rgba(148,163,184,0.10)', zeroline=False, rangeslider_visible=False)
+        fig.update_yaxes(showgrid=True, gridcolor='rgba(148,163,184,0.10)', zeroline=False)
+        fig.update_yaxes(range=[_y_min - _y_pad, _y_max + _y_pad], tickformat=',.4~f', side='right', row=1, col=1)
+        fig.update_yaxes(tickformat='~s', side='right', row=2, col=1)
+        fig.update_yaxes(range=[0, 100], tickvals=[0, 30, 50, 70, 100], side='right', row=3, col=1)
+        fig.update_xaxes(title_text='Horário', row=3, col=1)
 
         if st.session_state.get('dados_grafico_atualizados', False):
             st.session_state['dados_grafico_atualizados'] = False
             st.rerun()
 
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(
+            fig, use_container_width=True,
+            config={
+                'displaylogo': False,
+                'scrollZoom': True,
+                'responsive': True,
+                'modeBarButtonsToRemove': ['lasso2d', 'select2d'],
+            },
+        )
 
     else:
         st.info("Aguardando dados suficientes para plotar o grafico...")
