@@ -1,11 +1,13 @@
 ﻿import sqlite3
-from datetime import datetime
+from datetime import datetime, timezone
+from config.settings import BASE_DIR
 import pandas as pd
 
 
 def conectar():
-    conn = sqlite3.connect('simulacao.db')
+    conn = sqlite3.connect(BASE_DIR / 'simulacao.db', timeout=10)
     conn.execute("PRAGMA journal_mode=WAL")  # melhor performance com multiplas leituras
+    conn.execute("PRAGMA busy_timeout=5000")
 
     # FIX: colunas da tabela trades alinhadas com o que registrar_trade() insere
     conn.execute('''
@@ -44,6 +46,9 @@ def conectar():
         )
     ''')
 
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_trades_symbol_timestamp ON trades(symbol, timestamp)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_candles_symbol_timeframe_timestamp ON candles(symbol, timeframe, timestamp)")
+
     conn.commit()
     return conn
 
@@ -76,7 +81,7 @@ def registrar_trade(trade: dict):
             trade.get('lucro_liquido'),
             trade.get('retorno'),
             trade.get('retorno_liquido'),
-            str(trade.get('timestamp', datetime.utcnow())),
+            str(trade.get('timestamp', datetime.now(timezone.utc).isoformat())),
         ))
         conn.commit()
     finally:
@@ -92,6 +97,29 @@ def registrar_candle(symbol, timestamp, open, high, low, close, volume, timefram
                 (symbol, timestamp, open, high, low, close, volume, timeframe)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         ''', (symbol.replace('/', ''), str(timestamp), open, high, low, close, volume, timeframe))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def registrar_candles(symbol: str, candles: list[dict]) -> None:
+    """Persiste vários candles numa transação única, ignorando duplicatas."""
+    if not candles:
+        return
+    sym = symbol.replace('/', '')
+    rows = [
+        (sym, str(candle['timestamp']), candle['open'], candle['high'],
+         candle['low'], candle['close'], candle['volume'], candle['timeframe'])
+        for candle in candles
+    ]
+    conn = conectar()
+    try:
+        conn.executemany(
+            '''INSERT OR IGNORE INTO candles
+               (symbol, timestamp, open, high, low, close, volume, timeframe)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)''',
+            rows,
+        )
         conn.commit()
     finally:
         conn.close()

@@ -5,6 +5,11 @@
 binance_api.json
 telegram_config.json
 .streamlit/
+.venv/
+venv/
+estado_bot*.json
+.bot_state/
+.estado_bot_*.tmp
 
 # Python-generated files
 __pycache__/

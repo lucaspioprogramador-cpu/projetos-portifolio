@@ -2,9 +2,10 @@
 Simulador realista de execuÃ§Ã£o de ordens.
 Simula slippage, taxas, ordem book e execuÃ§Ã£o parcial.
 """
+import math
+from datetime import datetime, timezone
+
 import numpy as np
-from typing import Dict, Optional, Tuple
-from datetime import datetime
 
 
 class OrderSimulator:
@@ -21,19 +22,28 @@ class OrderSimulator:
         fee_rate: float = 0.001,  # 0.1% taxa padrÃ£o Binance
         slippage_base: float = 0.0005,  # 0.05% slippage base
         spread_pct: float = 0.0002,  # 0.02% spread bid/ask
-        volatility_multiplier: float = 2.0
+        volatility_multiplier: float = 2.0,
+        rng: np.random.Generator | None = None,
+        max_slippage: float = 0.05,
     ):
         self.fee_rate = fee_rate
         self.slippage_base = slippage_base
         self.spread_pct = spread_pct
         self.volatility_multiplier = volatility_multiplier
+        self.rng = rng if rng is not None else np.random.default_rng()
+        self.max_slippage = max_slippage
+        costs = (fee_rate, slippage_base, spread_pct, volatility_multiplier, max_slippage)
+        if not all(math.isfinite(value) for value in costs):
+            raise ValueError("Parâmetros do simulador devem ser finitos")
+        if not 0 <= fee_rate < 1 or min(slippage_base, spread_pct, volatility_multiplier, max_slippage) < 0 or spread_pct >= 2:
+            raise ValueError("Taxa deve estar em [0, 1) e custos não podem ser negativos")
     
     def calcular_slippage(
         self,
         preco_atual: float,
         quantidade: float,
-        volume_24h: Optional[float] = None,
-        volatilidade: Optional[float] = None,
+        volume_24h: float | None = None,
+        volatilidade: float | None = None,
         lado: str = 'buy'
     ) -> float:
         """
@@ -42,6 +52,15 @@ class OrderSimulator:
         - Volatilidade do mercado
         - Lado da ordem (compra geralmente tem mais slippage)
         """
+        if lado not in {'buy', 'sell'}:
+            raise ValueError("lado deve ser 'buy' ou 'sell'")
+        if not math.isfinite(preco_atual) or not math.isfinite(quantidade) or preco_atual <= 0 or quantidade <= 0:
+            raise ValueError("Preço e quantidade devem ser positivos e finitos")
+        if volatilidade is not None and (not math.isfinite(volatilidade) or volatilidade < 0):
+            raise ValueError("Volatilidade deve ser finita e não negativa")
+        if volume_24h is not None and (not math.isfinite(volume_24h) or volume_24h < 0):
+            raise ValueError("Volume 24h deve ser finito e não negativo")
+
         slippage = self.slippage_base
         
         # Ajuste por volatilidade
@@ -60,9 +79,9 @@ class OrderSimulator:
             slippage *= 1.2
         
         # Adiciona componente aleatÃ³ria (simula variaÃ§Ã£o do mercado)
-        slippage += np.random.uniform(-0.0001, 0.0001)
+        slippage += self.rng.uniform(-0.0001, 0.0001)
         
-        return max(slippage, 0.0)
+        return min(max(slippage, 0.0), self.max_slippage)
     
     def calcular_preco_execucao(
         self,
@@ -101,10 +120,10 @@ class OrderSimulator:
         lado: str,
         quantidade: float,
         preco_atual: float,
-        volume_24h: Optional[float] = None,
-        volatilidade: Optional[float] = None,
-        timestamp: Optional[datetime] = None
-    ) -> Dict:
+        volume_24h: float | None = None,
+        volatilidade: float | None = None,
+        timestamp: datetime | None = None
+    ) -> dict:
         """
         Simula execuÃ§Ã£o completa de uma ordem.
         
@@ -117,7 +136,9 @@ class OrderSimulator:
         - timestamp: Timestamp da execuÃ§Ã£o
         """
         if timestamp is None:
-            timestamp = datetime.now()
+            timestamp = datetime.now(timezone.utc)
+        if lado not in {'buy', 'sell'}:
+            raise ValueError("lado deve ser 'buy' ou 'sell'")
         
         # Calcular slippage
         slippage_pct = self.calcular_slippage(
@@ -131,13 +152,13 @@ class OrderSimulator:
         quantidade_executada = quantidade
         if volume_24h and quantidade_executada * preco_exec > volume_24h * 0.01:
             # Ordem muito grande (>1% do volume) pode ter execuÃ§Ã£o parcial
-            fill_rate = np.random.uniform(0.7, 1.0)
+            fill_rate = self.rng.uniform(0.7, 1.0)
             quantidade_executada = quantidade * fill_rate
         
         # Calcular valores
         valor_total = preco_exec * quantidade_executada
         taxas = self.calcular_taxas(valor_total)
-        valor_liquido = valor_total - taxas if lado == 'buy' else valor_total - taxas
+        valor_liquido = valor_total + taxas if lado == 'buy' else valor_total - taxas
         
         return {
             'lado': lado,
@@ -151,7 +172,8 @@ class OrderSimulator:
             'slippage_pct': slippage_pct,
             'slippage_valor': abs(preco_exec - preco_atual) * quantidade_executada,
             'timestamp': timestamp,
-            'executada_completa': abs(quantidade_executada - quantidade) < 0.0001
+            'executada_completa': abs(quantidade_executada - quantidade) < 0.0001,
+            'executada': quantidade_executada > 0
         }
     
     def simular_ordem_limit(
@@ -160,23 +182,36 @@ class OrderSimulator:
         quantidade: float,
         preco_limit: float,
         preco_atual: float,
-        volume_24h: Optional[float] = None
-    ) -> Dict:
+        volume_24h: float | None = None
+    ) -> dict:
         """
         Simula ordem limitada.
         SÃ³ executa se o preÃ§o atingir o limite.
         """
-        # Verificar se ordem pode ser executada
-        if lado == 'buy' and preco_limit >= preco_atual:
+        if lado not in {'buy', 'sell'}:
+            raise ValueError("lado deve ser 'buy' ou 'sell'")
+        if not all(math.isfinite(value) for value in (preco_limit, preco_atual, quantidade)):
+            raise ValueError("Preços e quantidade devem ser finitos")
+        if preco_limit <= 0 or preco_atual <= 0 or quantidade <= 0:
+            raise ValueError("Preços e quantidade devem ser positivos")
+
+        # Simula o preço corrente e rejeita fills que ultrapassariam o limite.
+        if lado == 'buy' and preco_atual <= preco_limit:
             # Ordem de compra limit sÃ³ executa se preÃ§o <= limite
-            return self.simular_execucao(
-                lado, quantidade, preco_limit, volume_24h, None
+            resultado = self.simular_execucao(
+                lado, quantidade, preco_atual, volume_24h, None
             )
-        elif lado == 'sell' and preco_limit <= preco_atual:
+            if resultado['preco_execucao'] <= preco_limit:
+                return resultado
+            return {'lado': lado, 'executada': False, 'quantidade_executada': 0.0, 'razao': 'Preço limite excedido'}
+        elif lado == 'sell' and preco_atual >= preco_limit:
             # Ordem de venda limit sÃ³ executa se preÃ§o >= limite
-            return self.simular_execucao(
-                lado, quantidade, preco_limit, volume_24h, None
+            resultado = self.simular_execucao(
+                lado, quantidade, preco_atual, volume_24h, None
             )
+            if resultado['preco_execucao'] >= preco_limit:
+                return resultado
+            return {'lado': lado, 'executada': False, 'quantidade_executada': 0.0, 'razao': 'Preço limite não atingido'}
         else:
             # Ordem nÃ£o executada
             return {
@@ -185,6 +220,7 @@ class OrderSimulator:
                 'preco_atual': preco_atual,
                 'quantidade': quantidade,
                 'executada': False,
+                'quantidade_executada': 0.0,
                 'razao': 'PreÃ§o nÃ£o atingiu o limite'
             }
 

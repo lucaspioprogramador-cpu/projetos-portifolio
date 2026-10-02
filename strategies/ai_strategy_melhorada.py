@@ -9,21 +9,49 @@ FIX: suporte a modelo_cache_fn — permite que o chamador (main_app.py) injete
 uma funcao de cache do session_state, evitando retreino a cada chamada.
 """
 
-from typing import Dict, Optional, Callable
-import pandas as pd
+from collections.abc import Callable
+
 import numpy as np
+import pandas as pd
 
 # FIX: importa de features.py em vez de duplicar as funcoes localmente
 from strategies.features import gerar_features_melhorada
 
 
+class RuleBasedTrendModel:
+    """Deterministic fallback when the compiled scikit-learn runtime is unavailable.
+
+    This is a technical-indicator voting rule, not a trained ML model. The UI
+    must disclose when this fallback is active.
+    """
+
+    def predict_proba(self, features: pd.DataFrame) -> np.ndarray:
+        def score(column: str, threshold: float = 0.0) -> np.ndarray:
+            values = features[column] if column in features else pd.Series(threshold, index=features.index)
+            centered = values.to_numpy(dtype=float) - threshold
+            return np.where(centered > 0, 1.0, np.where(centered < 0, 0.0, 0.5))
+
+        votes = np.column_stack((
+            score("retorno"),
+            score("macd_hist"),
+            score("price_vs_ma20"),
+            score("volume_ratio", threshold=1.0),
+        ))
+        confidence = votes.mean(axis=1)
+        return np.column_stack((1 - confidence, confidence))
+
+    def predict(self, features: pd.DataFrame) -> np.ndarray:
+        probabilities = self.predict_proba(features)
+        return (probabilities[:, 1] >= 0.5).astype(int)
+
+
 def executar_estrategia_ai_melhorada(
     df: pd.DataFrame,
     posicao_aberta: bool = False,
-    preco_compra: Optional[float] = None,
-    config: Optional[Dict] = None,
-    modelo_cache_fn: Optional[Callable] = None,
-) -> Dict:
+    preco_compra: float | None = None,
+    config: dict | None = None,
+    modelo_cache_fn: Callable | None = None,
+) -> dict:
     """
     Executa estrategia de IA melhorada com multiplos filtros.
 
@@ -88,17 +116,21 @@ def executar_estrategia_ai_melhorada(
     if modelo_cache_fn is not None:
         modelo = modelo_cache_fn(df, available_cols)
     else:
-        from sklearn.ensemble import RandomForestClassifier
-        y = (df['close'].shift(-1) > df['close']).astype(int)
-        X_train = X[:-1].dropna()
-        y_train = y[:-1].loc[X_train.index]
-        if len(X_train) < 50:
-            return {'sinal': 'hold', 'confianca': 0.0, 'razao': 'Dados de treino insuficientes'}
-        modelo = RandomForestClassifier(
-            n_estimators=200, max_depth=15,
-            min_samples_split=5, random_state=42, n_jobs=-1
-        )
-        modelo.fit(X_train, y_train)
+        try:
+            from sklearn.ensemble import RandomForestClassifier
+        except ImportError:
+            modelo = RuleBasedTrendModel()
+        else:
+            y = (df['close'].shift(-1) > df['close']).astype(int)
+            X_train = X[:-1].dropna()
+            y_train = y[:-1].loc[X_train.index]
+            if len(X_train) < 50:
+                return {'sinal': 'hold', 'confianca': 0.0, 'razao': 'Dados de treino insuficientes'}
+            modelo = RandomForestClassifier(
+                n_estimators=200, max_depth=15,
+                min_samples_split=5, random_state=42, n_jobs=-1
+            )
+            modelo.fit(X_train, y_train)
 
     if modelo is None:
         return {'sinal': 'hold', 'confianca': 0.0, 'razao': 'Modelo nao disponivel ainda'}
@@ -109,7 +141,7 @@ def executar_estrategia_ai_melhorada(
         previsao = modelo.predict(X_last)[0]
         previsao_proba = modelo.predict_proba(X_last)[0]
         confianca = max(previsao_proba)
-    except Exception:
+    except (ImportError, ValueError, TypeError, AttributeError, IndexError, FloatingPointError):
         return {'sinal': 'hold', 'confianca': 0.0, 'razao': 'Erro na previsao do modelo'}
 
     ultimo = df.iloc[-1]

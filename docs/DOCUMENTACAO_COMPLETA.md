@@ -26,16 +26,16 @@
 
 ## Visão Geral
 
-O **L-Trade AI** é um simulador/bot de trading de criptomoedas que:
+O **L-Trade AI** é um protótipo para análise de mercado e trading simulado que:
 
 - **Coleta dados** em tempo real via WebSocket (Binance)
 - **Analisa sinais** usando IA (Random Forest com indicadores técnicos)
-- **Executa ordens** de compra/venda com simulação realista (slippage, taxas)
+- **Simula fills** de compra/venda (spread, slippage, taxas e fills parciais)
 - **Gerencia risco** (stop loss, take profit, sizing de posição)
 - **Gera relatórios** e métricas de performance
 - **Permite backtesting** em dados históricos
 
-Pode rodar contra a **Binance real** (com API key) ou usar dados **mock** para testes sem credenciais.
+Pode coletar dados públicos da Binance ou usar dados mock. A execução de ordens reais **não está implementada**; saldos e resultados no dashboard são simulações.
 
 ---
 
@@ -75,12 +75,11 @@ L-Trade AI/
 │   └── migrations.sql       # Schema do banco
 │
 ├── config/                  # Configurações
-│   └── settings.py          # Carregamento de ENV e binance_api.json
+│   └── settings.py          # Carregamento de ENV/.env
 │
 ├── relatorios/              # Saída de relatórios (CSV)
 │
 ├── requirements.txt         # Dependências Python
-├── binance_api.json         # Credenciais (ignorado no git)
 └── README.md                # Documentação de setup
 
 ```
@@ -226,7 +225,7 @@ L-Trade AI/
 #### `settings.py`
 **O que faz:** Carregamento de configurações e credenciais.
 - Lê variáveis de ambiente (`.env`)
-- Fallback: lê `binance_api.json` se `.env` não existir
+- Não lê credenciais de JSON legado; segredos digitados na UI valem apenas para a sessão
 - Exporta: `BINANCE_API_KEY`, `BINANCE_API_SECRET`, `DEFAULT_TIMEFRAME`
 
 ---
@@ -238,7 +237,7 @@ L-Trade AI/
 ```
 Sidebar (Configurações)
     ↓
-Credenciais → binance_api.json ou ENV
+Credenciais → ENV/.env ou entrada temporária na sessão
     ↓
 Iniciar WebSocket (Binance ThreadedWebsocketManager)
     ↓
@@ -1065,13 +1064,11 @@ Observação: A análise se baseia no código presente na árvore do repositóri
 - Performance: retrain do modelo a cada bar é custoso — mover para pipeline offline/assíncrono.
 - Confiabilidade: falta de testes automatizados e de tratamento robusto de exceções em integração com exchange.
 
-### Checklist de Ajustes Prioritários (curto prazo)
-1. Implementar logging básico (`logging`) em todos os módulos.
-2. Evitar treinar modelo a cada tick — usar modelo treinado carregado para inferência.
-3. Alinhar assinaturas entre `exchanges/base.py` e `exchanges/mock.py`.
-4. Implementar reconexão automática no WebSocket e proteção de `st.session_state`.
-5. Pinagem de dependências em `requirements.txt` e adicionar `requirements-dev.txt`.
-6. Incluir testes unitários para `core/risk.py`, `core/simulator.py` e `backtest/runner.py`.
+### Status das recomendações
+- Há testes unitários em `tests/` para risco, fills, features, dados, persistência e backtest; o GitHub Actions executa a suíte.
+- As dependências têm faixas de versão e `streamlit-autorefresh` está declarada.
+- A UI limita decisões a candles encerrados, mantém a fila WebSocket por sessão e persiste o snapshot local atomicamente.
+- A execução real continua não implementada. Reconciliação com exchange, autenticação gerenciada, auditoria da estratégia e testes extensivos de reconexão seguem necessários antes de qualquer uso financeiro.
 
 
 **Última atualização:** Dezembro 10, 2025

@@ -11,8 +11,8 @@ st.write("? Aplicação está rodando!")
 st.write(f"Python: {sys.version}")
 
 try:
-    from config.settings import BINANCE_API_KEY, BINANCE_API_SECRET
-    st.success("? Config importada")
+    from config.settings import DEFAULT_TIMEFRAME
+    st.success(f"Config importada (timeframe padrão: {DEFAULT_TIMEFRAME})")
 except Exception as e:
     st.error(f"Erro ao importar config: {e}")
 

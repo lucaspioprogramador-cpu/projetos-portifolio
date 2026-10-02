@@ -2,15 +2,19 @@
 MÃ³dulo de features compartilhadas para as estratÃ©gias.
 ContÃ©m cÃ¡lculos de indicadores e geradores de features para as variantes de estratÃ©gia.
 """
-import pandas as pd
 import numpy as np
+import pandas as pd
+
 
 def calcular_rsi(df: pd.DataFrame, periodo: int = 14) -> pd.Series:
     delta = df['close'].diff()
     ganho = delta.clip(lower=0).rolling(window=periodo).mean()
     perda = -delta.clip(upper=0).rolling(window=periodo).mean()
-    rs = ganho / perda
-    return 100 - (100 / (1 + rs))
+    rs = ganho / perda.replace(0, np.nan)
+    rsi = 100 - (100 / (1 + rs))
+    rsi = rsi.mask((perda == 0) & (ganho > 0), 100)
+    rsi = rsi.mask((ganho == 0) & (perda > 0), 0)
+    return rsi.mask((ganho == 0) & (perda == 0), 50)
 
 def calcular_macd(df: pd.DataFrame, fast: int = 12, slow: int = 26, signal: int = 9):
     ema_fast = df['close'].ewm(span=fast, adjust=False).mean()
@@ -41,15 +45,19 @@ def calcular_atr(df: pd.DataFrame, periodo: int = 14) -> pd.Series:
 
 def calcular_adx(df: pd.DataFrame, periodo: int = 14) -> pd.Series:
     atr = calcular_atr(df, periodo)
-    plus_dm = df['high'].diff()
-    minus_dm = -df['low'].diff()
-    plus_dm[plus_dm < 0] = 0
-    minus_dm[minus_dm < 0] = 0
-    plus_di = 100 * (plus_dm.rolling(periodo).mean() / atr)
-    minus_di = 100 * (minus_dm.rolling(periodo).mean() / atr)
-    dx = 100 * np.abs(plus_di - minus_di) / (plus_di + minus_di)
-    adx = dx.rolling(periodo).mean()
-    return adx
+    up_move = df['high'].diff()
+    down_move = -df['low'].diff()
+    plus_dm = up_move.where((up_move > down_move) & (up_move > 0), 0.0)
+    minus_dm = down_move.where((down_move > up_move) & (down_move > 0), 0.0)
+    plus_di = 100 * (plus_dm.rolling(periodo).mean() / atr.replace(0, np.nan))
+    minus_di = 100 * (minus_dm.rolling(periodo).mean() / atr.replace(0, np.nan))
+    denominator = (plus_di + minus_di).replace(0, np.nan)
+    dx = (100 * (plus_di - minus_di).abs() / denominator).fillna(0)
+    return dx.rolling(periodo).mean()
+
+
+def _clean_features(df: pd.DataFrame) -> pd.DataFrame:
+    return df.replace([np.inf, -np.inf], np.nan).dropna()
 
 
 def gerar_features_basic(df: pd.DataFrame) -> pd.DataFrame:
@@ -67,8 +75,7 @@ def gerar_features_basic(df: pd.DataFrame) -> pd.DataFrame:
     df['obv'] = calcular_obv(df)
     df['volume_ma'] = df['volume'].rolling(window=10).mean()
     df['volume_spike'] = (df['volume'] > 1.5 * df['volume_ma']).astype(int)
-    df = df.dropna()
-    return df
+    return _clean_features(df)
 
 
 def gerar_features_corrigido(df: pd.DataFrame) -> pd.DataFrame:
@@ -79,8 +86,7 @@ def gerar_features_corrigido(df: pd.DataFrame) -> pd.DataFrame:
     df['media_10'] = df['close'].rolling(window=10).mean()
     df['rsi'] = calcular_rsi(df)
     df['media_diff'] = df['media_5'] - df['media_10']
-    df = df.dropna()
-    return df
+    return _clean_features(df)
 
 
 def gerar_features_melhorada(df: pd.DataFrame) -> pd.DataFrame:
@@ -102,9 +108,10 @@ def gerar_features_melhorada(df: pd.DataFrame) -> pd.DataFrame:
     df['macd'], df['macd_signal'], df['macd_hist'] = calcular_macd(df)
     df['bb_upper'], df['bb_lower'] = calcular_bollinger_bands(df)
     df['bb_width'] = (df['bb_upper'] - df['bb_lower']) / df['close']
-    df['bb_position'] = (df['close'] - df['bb_lower']) / (df['bb_upper'] - df['bb_lower'])
+    bb_width_price = (df['bb_upper'] - df['bb_lower']).replace(0, np.nan)
+    df['bb_position'] = ((df['close'] - df['bb_lower']) / bb_width_price).fillna(0.5)
     df['volume_ma'] = df['volume'].rolling(window=10).mean()
-    df['volume_ratio'] = df['volume'] / df['volume_ma']
+    df['volume_ratio'] = (df['volume'] / df['volume_ma'].replace(0, np.nan)).fillna(1.0)
     df['volume_spike'] = (df['volume'] > 1.5 * df['volume_ma']).astype(int)
     df['obv'] = calcular_obv(df)
     df['obv_ma'] = df['obv'].rolling(window=10).mean()
@@ -116,5 +123,4 @@ def gerar_features_melhorada(df: pd.DataFrame) -> pd.DataFrame:
     df['volatility_pct'] = df['volatility'] / df['close']
     df['price_vs_ma5'] = (df['close'] - df['ma_5']) / df['ma_5']
     df['price_vs_ma20'] = (df['close'] - df['ma_20']) / df['ma_20']
-    df = df.dropna()
-    return df
+    return _clean_features(df)

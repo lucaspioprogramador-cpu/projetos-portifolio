@@ -1,25 +1,29 @@
 # -*- coding: utf-8 -*-
 
 import logging
+import hmac
+import math
 import streamlit as st
 import streamlit.components.v1 as components
 from streamlit_autorefresh import st_autorefresh
 import pandas as pd
-import numpy as np
 import time
 from datetime import datetime, timedelta
 import pytz
 import plotly.graph_objects as go
 from binance.client import Client
 from binance import ThreadedWebsocketManager
-from core.execution import executar_ordem_simulada
-import threading
+from core.execution import executar_ordem_simulada, apply_simulated_fill
+from core.risk import position_size, affordable_quantity, exposure_budget
 import queue
 import os
 import json
 import tempfile
-from config.settings import BINANCE_API_KEY, BINANCE_API_SECRET
-from db.database import registrar_candle, get_candles, registrar_trade, count_trades_e_candles, get_trades
+import uuid
+from pathlib import Path
+from config.settings import DEFAULT_TIMEFRAME
+from db.database import registrar_candle, registrar_candles, get_candles, registrar_trade, count_trades_e_candles, get_trades
+from core.data import is_closed_candle
 import warnings
 
 warnings.filterwarnings(
@@ -28,7 +32,7 @@ warnings.filterwarnings(
 )
 
 # FIX: importa apenas a estrategia melhorada â€” deprecated (ai_strategy.py) removido
-from strategies.ai_strategy_melhorada import executar_estrategia_ai_melhorada
+from strategies.ai_strategy_melhorada import RuleBasedTrendModel, executar_estrategia_ai_melhorada
 from strategies.features import gerar_features_basic, gerar_features_melhorada
 from signal_preview_panel import render_signal_panel
 import requests
@@ -40,56 +44,39 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-_ws_manager = None
 BRAZIL_TZ = pytz.timezone('America/Sao_Paulo')
+st.set_page_config(page_title="Trading Bot Dashboard", layout="wide")
+
+# Proteção básica opcional para instâncias expostas fora do computador local.
+_APP_PASSWORD = os.getenv('APP_PASSWORD', '')
+if _APP_PASSWORD:
+    if not st.session_state.get('authenticated', False):
+        st.title('Acesso ao Trading Bot')
+        with st.form('login_form'):
+            _password_input = st.text_input('Senha de acesso', type='password')
+            _login_submitted = st.form_submit_button('Entrar')
+        if _login_submitted and hmac.compare_digest(_password_input, _APP_PASSWORD):
+            st.session_state['authenticated'] = True
+            st.rerun()
+        if _login_submitted:
+            st.error('Senha inválida')
+        st.stop()
 
 
 # ---------------------------------------------------------------------------
 # Utilitarios
 # ---------------------------------------------------------------------------
 
-def salvar_credenciais(api_key, api_secret):
-    try:
-        with open("binance_api.json", "w", encoding="utf-8") as f:
-            json.dump({"api_key": api_key, "api_secret": api_secret}, f)
-    except Exception as e:
-        logger.exception("Erro ao salvar credenciais Binance: %s", e)
-
-
-def carregar_credenciais():
-    try:
-        if os.path.exists("binance_api.json"):
-            with open("binance_api.json", "r", encoding="utf-8") as f:
-                data = json.load(f)
-                return data.get("api_key", ""), data.get("api_secret", "")
-    except Exception as e:
-        logger.exception("Erro ao carregar credenciais Binance: %s", e)
-    return "", ""
-
-
-def salvar_config_telegram(token, chat_id):
-    config = {"telegram_token": token, "telegram_chat_id": chat_id}
-    try:
-        with open("telegram_config.json", "w", encoding="utf-8") as f:
-            json.dump(config, f)
-        return True
-    except Exception as e:
-        logger.exception("Erro ao salvar config Telegram: %s", e)
-        return False
-
-
 def carregar_config_telegram():
-    try:
-        if os.path.exists("telegram_config.json"):
-            with open("telegram_config.json", "r", encoding="utf-8") as f:
-                config = json.load(f)
-                return config.get("telegram_token", ""), config.get("telegram_chat_id", "")
-    except Exception as e:
-        logger.exception("Erro ao carregar config Telegram: %s", e)
     return "", ""
 
 
-ESTADO_BOT_FILE = "estado_bot.json"
+def caminho_estado_bot():
+    """Retorna snapshot local isolado para a sessão corrente do Streamlit."""
+    state_dir = Path(os.getenv('BOT_STATE_DIR', Path.cwd() / '.bot_state'))
+    state_dir.mkdir(parents=True, exist_ok=True)
+    state_id = st.session_state.setdefault('_snapshot_id', uuid.uuid4().hex)
+    return state_dir / f"estado_bot_{state_id}.json"
 
 
 def salvar_estado_bot():
@@ -99,6 +86,7 @@ def salvar_estado_bot():
     seja restaurado na proxima vez que o bot ligar.
     """
     try:
+        estado_file = caminho_estado_bot()
         posicoes_raw = st.session_state.bot_data.get('posicoes', {})
 
         # Serializa as ordens — converte timestamps para string
@@ -128,10 +116,15 @@ def salvar_estado_bot():
             'salvo_em':     datetime.now(BRAZIL_TZ).isoformat(),
         }
 
-        with open(ESTADO_BOT_FILE, 'w', encoding='utf-8') as f:
-            json.dump(estado, f, ensure_ascii=False, indent=2)
+        with tempfile.NamedTemporaryFile(
+            mode='w', encoding='utf-8', delete=False, dir=estado_file.parent,
+            prefix='.estado_bot_', suffix='.tmp'
+        ) as temp_file:
+            json.dump(estado, temp_file, ensure_ascii=False, indent=2)
+            temp_path = temp_file.name
+        os.replace(temp_path, estado_file)
 
-        logger.info("Estado do bot salvo em %s", ESTADO_BOT_FILE)
+        logger.info("Estado da sessão salvo localmente")
     except Exception as e:
         logger.exception("Erro ao salvar estado do bot: %s", e)
 
@@ -143,19 +136,51 @@ def carregar_estado_bot():
     Retorna True se o estado foi restaurado, False caso contrario.
     """
     try:
-        if not os.path.exists(ESTADO_BOT_FILE):
+        estado_file = caminho_estado_bot()
+        if not estado_file.exists():
             return False
 
-        with open(ESTADO_BOT_FILE, 'r', encoding='utf-8') as f:
+        with open(estado_file, 'r', encoding='utf-8') as f:
             estado = json.load(f)
 
         st.session_state.bot_data['saldo_usdt'] = estado.get('saldo_usdt', st.session_state.bot_data['saldo_usdt'])
         st.session_state.bot_data['saldo_inicial'] = estado.get('saldo_inicial', st.session_state.bot_data['saldo_inicial'])
-        st.session_state.bot_data['posicoes'] = estado.get('posicoes', {})
-        st.session_state.bot_data['trades'] = estado.get('trades', [])
+        posicoes = estado.get('posicoes', {})
+        trades = estado.get('trades', [])
+        saldo = estado.get('saldo_usdt', st.session_state.bot_data['saldo_usdt'])
+        saldo_inicial_salvo = estado.get('saldo_inicial', st.session_state.bot_data['saldo_inicial'])
+        if not isinstance(posicoes, dict) or not isinstance(trades, list):
+            raise ValueError("Snapshot contém posições ou trades em formato inválido")
+        if any(not isinstance(trade, dict) for trade in trades):
+            raise ValueError("Snapshot contém trade incompatível")
+        if not all(isinstance(value, (int, float)) and math.isfinite(value) and value >= 0 for value in (saldo, saldo_inicial_salvo)):
+            raise ValueError("Snapshot contém saldo inválido")
+        for sym, ordens in list(posicoes.items()):
+            if isinstance(ordens, dict):
+                # Migra de forma segura o formato legado de uma posição por par.
+                ordens = [{
+                    'preco_compra': ordens.get('preco_compra', 0),
+                    'quantidade': ordens.get('quantidade', 0),
+                    'valor_investido': ordens.get('valor_investido', 0),
+                    'timestamp': ordens.get('timestamp', ''),
+                }] if ordens.get('aberta') else []
+                posicoes[sym] = ordens
+            if not isinstance(ordens, list):
+                raise ValueError("Snapshot contém posição incompatível; estado não restaurado")
+            for ordem in ordens:
+                if not isinstance(ordem, dict) or not all(
+                    isinstance(ordem.get(key), (int, float))
+                    and math.isfinite(ordem[key]) and ordem[key] >= 0
+                    for key in ('preco_compra', 'quantidade', 'valor_investido')
+                ):
+                    raise ValueError("Snapshot contém ordem inválida; estado não restaurado")
+        st.session_state.bot_data['saldo_usdt'] = saldo
+        st.session_state.bot_data['saldo_inicial'] = saldo_inicial_salvo
+        st.session_state.bot_data['posicoes'] = posicoes
+        st.session_state.bot_data['trades'] = trades
 
         salvo_em = estado.get('salvo_em', 'desconhecido')
-        logger.info("Estado do bot restaurado de %s (salvo em: %s)", ESTADO_BOT_FILE, salvo_em)
+        logger.info("Snapshot local da sessão restaurado (salvo em: %s)", salvo_em)
         return True
 
     except Exception as e:
@@ -163,8 +188,10 @@ def carregar_estado_bot():
         return False
 
 
-def enviar_notificacao_telegram(mensagem):
+def enviar_notificacao_telegram(mensagem, force=False):
     try:
+        if not force and not st.session_state.get('notificacoes_ativas', False):
+            return False
         token = st.session_state.get('telegram_token', '').strip()
         chat_id = st.session_state.get('telegram_chat_id', '').strip()
         if not token or not chat_id:
@@ -191,10 +218,11 @@ def enviar_notificacao_telegram(mensagem):
         logger.error("Telegram: timeout na conexao")
         return False
     except requests.exceptions.ConnectionError as e:
-        logger.error("Telegram: erro de conexao: %s", e)
+        logger.error("Telegram: erro de conexão (%s)", type(e).__name__)
         return False
     except Exception as e:
-        logger.exception("Telegram: erro geral: %s", e)
+        # Não incluir mensagem/URL da exceção: a URL da API contém o token.
+        logger.error("Telegram: erro geral (%s)", type(e).__name__)
         return False
 
 
@@ -207,7 +235,7 @@ def format_time(dt):
 
 
 def calcular_posicao(saldo, preco, risco, stop_pct):
-    return (saldo * risco) / (preco * stop_pct)
+    return position_size(saldo, risco, stop_pct, preco)
 
 
 # ---------------------------------------------------------------------------
@@ -218,8 +246,6 @@ symbols = [
     "BTC/USDT", "ETH/USDT", "BNB/USDT", "SOL/USDT", "XRP/USDT",
     "LTC/USDT", "PEPE/USDT", "PENDLE/USDT", "JTO/USDT", "BB/USDT", "SUI/USDT"
 ]
-
-st.set_page_config(page_title="Trading Bot Dashboard", layout="wide")
 
 st.markdown("""
 <style>
@@ -234,49 +260,13 @@ st.markdown("""
 # ---------------------------------------------------------------------------
 
 with st.sidebar:
-    st.markdown('<div class="sidebar-title">Credenciais</div>', unsafe_allow_html=True)
-
-    if 'api_loaded' not in st.session_state:
-        api_key_env = BINANCE_API_KEY or ""
-        api_secret_env = BINANCE_API_SECRET or ""
-        if not api_key_env or not api_secret_env:
-            api_key_loaded, api_secret_loaded = carregar_credenciais()
-            api_key_env = api_key_env or api_key_loaded
-            api_secret_env = api_secret_env or api_secret_loaded
-        st.session_state['api_key'] = api_key_env
-        st.session_state['api_secret'] = api_secret_env
-        st.session_state['api_loaded'] = True
-
     if 'telegram_loaded' not in st.session_state:
         telegram_token_loaded, telegram_chat_id_loaded = carregar_config_telegram()
         st.session_state['telegram_token'] = telegram_token_loaded
         st.session_state['telegram_chat_id'] = telegram_chat_id_loaded
         st.session_state['telegram_loaded'] = True
 
-    st.markdown("**API Key Binance**")
-    api_key = st.text_input(
-        "", value=st.session_state.get('api_key', ''),
-        type="password", placeholder="Digite sua API Key",
-        label_visibility="collapsed"
-    )
-    st.markdown("**API Secret Binance**")
-    api_secret = st.text_input(
-        "", value=st.session_state.get('api_secret', ''),
-        type="password", placeholder="Digite seu API Secret",
-        label_visibility="collapsed"
-    )
-
-    col_save, col_cancel = st.columns(2)
-    with col_save:
-        if st.button("Salvar", key="save_creds", use_container_width=True):
-            salvar_credenciais(api_key, api_secret)
-            st.session_state['api_key'] = api_key
-            st.session_state['api_secret'] = api_secret
-            st.success("Credenciais salvas!")
-    with col_cancel:
-        if st.button("Cancelar", key="cancel_creds", use_container_width=True):
-            pass
-
+    st.caption("A Binance fornece candles públicos sem API Key. Este app não envia ordens reais.")
     st.markdown("---")
     st.markdown('<div class="sidebar-title">Notificacoes Telegram</div>', unsafe_allow_html=True)
 
@@ -310,7 +300,7 @@ with st.sidebar:
                     f"{datetime.now(BRAZIL_TZ).strftime('%d/%m/%Y %H:%M:%S')}"
                 )
                 try:
-                    resultado = enviar_notificacao_telegram(mensagem_teste)
+                    resultado = enviar_notificacao_telegram(mensagem_teste, force=True)
                     if resultado:
                         st.success("Mensagem de teste enviada!")
                     else:
@@ -320,11 +310,10 @@ with st.sidebar:
             else:
                 st.warning("Configure o token e chat ID primeiro")
     with col_save_telegram:
-        if st.button("Salvar Telegram", use_container_width=True, key="save_telegram"):
-            salvar_config_telegram(telegram_token_input, telegram_chat_id_input)
+        if st.button("Usar Telegram nesta sessão", use_container_width=True, key="save_telegram"):
             st.session_state['telegram_token'] = telegram_token_input
             st.session_state['telegram_chat_id'] = telegram_chat_id_input
-            st.success("Configuracoes do Telegram salvas!")
+            st.success("Telegram disponível apenas nesta sessão; configuração não gravada em disco.")
 
     with st.expander("Como obter Token e Chat ID do Telegram"):
         st.markdown("""
@@ -356,9 +345,12 @@ with st.sidebar:
         st.error("Par invalido!")
 
     st.markdown("**Timeframe**")
+    timeframe_options = ["1m", "5m", "15m", "30m", "1h", "4h"]
     timeframe = st.selectbox(
-        "", ["1m", "5m", "15m", "30m", "1h", "4h"],
-        label_visibility="collapsed", index=0
+        "", timeframe_options,
+        label_visibility="collapsed",
+        index=timeframe_options.index(DEFAULT_TIMEFRAME)
+        if DEFAULT_TIMEFRAME in timeframe_options else 0,
     )
 
     st.markdown("**Saldo Inicial (USDT)**")
@@ -370,6 +362,11 @@ with st.sidebar:
     risco_por_trade_display = st.slider("", 0.1, 5.0, 1.0, label_visibility="collapsed")
     risco_por_trade = risco_por_trade_display / 100
     st.caption("1/5")
+
+    st.markdown("**Exposição máxima total (%)**")
+    max_exposicao_total = st.slider("", 10, 100, 50, label_visibility="collapsed", key="max_exposicao_total") / 100
+    st.markdown("**Exposição máxima por par (%)**")
+    max_exposicao_par = st.slider("", 5, 100, 25, label_visibility="collapsed", key="max_exposicao_par") / 100
 
     st.markdown("**Stop Loss (%)**")
     stop_loss_display = st.slider("", 0.1, 10.0, 2.0, label_visibility="collapsed", key="sl")
@@ -385,8 +382,8 @@ with st.sidebar:
 
     with st.expander("Configuracoes Avancadas"):
         usar_simulacao = st.checkbox(
-            "Usar Simulacao Realista", value=True,
-            help="Simula slippage, taxas e execucao parcial"
+            "Aplicar custos realistas na simulação", value=True,
+            help="Se desmarcado, continua sendo simulação: usa fill teórico e taxa, sem slippage nem fill parcial. Nunca envia ordens reais."
         )
         usar_estrategia_melhorada = st.checkbox(
             "Usar Estrategia Melhorada (IA)", value=True,
@@ -453,12 +450,20 @@ def ensure_bot_state():
     for key, value in defaults.items():
         st.session_state.bot_data.setdefault(key, value)
     if st.session_state.bot_data.get('saldo_inicial') != saldo_inicial:
+        posicoes_abertas = any(
+            bool(ordens) if isinstance(ordens, list)
+            else bool(isinstance(ordens, dict) and ordens.get('aberta'))
+            for ordens in st.session_state.bot_data.get('posicoes', {}).values()
+        )
+        possui_trades = bool(st.session_state.bot_data.get('trades'))
         st.session_state.bot_data['saldo_inicial'] = saldo_inicial
-        if not st.session_state.bot_data.get('posicao_aberta', False):
+        if not posicoes_abertas and not possui_trades:
             st.session_state.bot_data['saldo_usdt'] = saldo_inicial
 
 
 ensure_bot_state()
+if '_ws_candle_queue' not in st.session_state:
+    st.session_state['_ws_candle_queue'] = queue.Queue(maxsize=500)
 
 # Restaura estado salvo se existir e ainda nao foi carregado nesta sessao
 if not st.session_state.get('estado_restaurado', False):
@@ -467,16 +472,6 @@ if not st.session_state.get('estado_restaurado', False):
         logger.info("Estado anterior do bot restaurado com sucesso")
     else:
         st.session_state['estado_restaurado'] = True  # marca mesmo sem arquivo
-
-websocket_data_global = {}
-websocket_data_lock = threading.Lock()
-file_write_lock = threading.Lock()
-
-# Fila global thread-safe para comunicacao websocket -> Streamlit.
-# DEVE ser variavel global Python pura â€” st.session_state nao e acessivel
-# fora da thread principal do Streamlit (callbacks do websocket rodam em outra thread).
-_WS_CANDLE_QUEUE: queue.Queue = queue.Queue(maxsize=500)
-
 
 # ---------------------------------------------------------------------------
 # FIX: cache do modelo RandomForest no session_state.
@@ -487,21 +482,43 @@ _WS_CANDLE_QUEUE: queue.Queue = queue.Queue(maxsize=500)
 # pelo menos 10 candles novos desde o ultimo treino.
 # ---------------------------------------------------------------------------
 
-def obter_modelo_treinado(df: pd.DataFrame, feature_cols: list):
+def obter_modelo_treinado(df: pd.DataFrame, feature_cols: list, symbol_key: str = 'default'):
     """
     Retorna o modelo RandomForest do cache (session_state) ou treina um novo
     se ainda nao existe ou se chegaram dados novos suficientes.
     """
-    from sklearn.ensemble import RandomForestClassifier
-
-    cache_key = 'rf_model_cache'
-    cache_idx_key = 'rf_model_ultimo_treino_idx'
-
+    cache_key = f'rf_model_cache_{symbol_key}'
+    timestamp_key = f'rf_model_ultimo_timestamp_{symbol_key}'
+    count_key = f'rf_model_candles_novos_{symbol_key}'
     modelo_cache = st.session_state.get(cache_key)
-    ultimo_treino_idx = st.session_state.get(cache_idx_key, 0)
     idx_atual = len(df)
+    timestamp_atual = str(df.iloc[-1].get('timestamp', idx_atual)) if not df.empty else str(idx_atual)
 
-    deve_treinar = modelo_cache is None or (idx_atual - ultimo_treino_idx) >= 10
+    if isinstance(modelo_cache, RuleBasedTrendModel):
+        return modelo_cache
+
+    try:
+        from sklearn.ensemble import RandomForestClassifier
+    except ImportError as error:
+        logger.warning(
+            "scikit-learn indisponível (%s); usando fallback heurístico determinístico",
+            type(error).__name__,
+        )
+        st.session_state['ml_fallback_active'] = True
+        modelo_cache = RuleBasedTrendModel()
+        st.session_state[cache_key] = modelo_cache
+        st.session_state[timestamp_key] = timestamp_atual
+        st.session_state[count_key] = 0
+        return modelo_cache
+
+    timestamp_anterior = st.session_state.get(timestamp_key)
+    candles_novos = st.session_state.get(count_key, 0)
+    if timestamp_atual != timestamp_anterior:
+        candles_novos = 0 if timestamp_anterior is None else candles_novos + 1
+        st.session_state[timestamp_key] = timestamp_atual
+        st.session_state[count_key] = candles_novos
+
+    deve_treinar = modelo_cache is None or candles_novos >= 10
 
     if deve_treinar:
         X = df[feature_cols].copy()
@@ -516,9 +533,17 @@ def obter_modelo_treinado(df: pd.DataFrame, feature_cols: list):
             n_estimators=200, max_depth=15,
             min_samples_split=5, random_state=42, n_jobs=-1
         )
-        modelo.fit(X_train, y_train)
+        try:
+            modelo.fit(X_train, y_train)
+        except ImportError as error:
+            logger.warning(
+                "Runtime compilado do scikit-learn falhou (%s); usando fallback heurístico determinístico",
+                type(error).__name__,
+            )
+            st.session_state['ml_fallback_active'] = True
+            modelo = RuleBasedTrendModel()
         st.session_state[cache_key] = modelo
-        st.session_state[cache_idx_key] = idx_atual
+        st.session_state[count_key] = 0
         logger.info("Modelo RF retreinado com %d amostras (idx %d)", len(X_train), idx_atual)
         return modelo
 
@@ -592,6 +617,12 @@ def analisar_e_executar_trades():
     for sym in pares_com_dados:
         try:
             df = st.session_state.bot_data['dados_mercado'][sym]
+            candle_id = str(df.iloc[-1].get('timestamp', len(df)))
+            processed_key = f"ultimo_candle_avaliado_{sym}_{timeframe}"
+            if st.session_state.get(processed_key) == candle_id:
+                continue
+            # Cada candle fechado pode gerar no máximo uma decisão por par/timeframe.
+            st.session_state[processed_key] = candle_id
             posicao = get_posicao(sym)
 
             if usar_melhorada:
@@ -600,7 +631,7 @@ def analisar_e_executar_trades():
                     posicao_aberta=posicao['aberta'],
                     preco_compra=posicao['preco_compra'],
                     config=config,
-                    modelo_cache_fn=obter_modelo_treinado,
+                    modelo_cache_fn=lambda frame, cols, pair=sym: obter_modelo_treinado(frame, cols, pair),
                 )
                 sinal = resultado.get('sinal', 'hold')
                 logger.info(
@@ -635,9 +666,29 @@ def analisar_e_executar_trades():
             preco_atual = df.iloc[-1]['close']
 
             if sinal == 'buy':
-                # MULTI-ORDEM: compra sempre que houver sinal e saldo suficiente
-                # nao ha limite de ordens por par — so para quando o saldo acabar
+                total_investido = sum(
+                    ordem.get('valor_investido', 0)
+                    for ordens_ativas in st.session_state.bot_data.get('posicoes', {}).values()
+                    if isinstance(ordens_ativas, list)
+                    for ordem in ordens_ativas
+                )
+                investido_par = sum(
+                    ordem.get('valor_investido', 0) for ordem in ordens_abertas
+                )
+                exposicao_disponivel = exposure_budget(
+                    saldo_inicial,
+                    total_investido,
+                    investido_par,
+                    max_exposicao_total,
+                    max_exposicao_par,
+                )
+                caixa_para_entrada = min(saldo_disponivel, exposicao_disponivel)
                 quantidade = calcular_posicao(saldo_disponivel, preco_atual, risco_por_trade, stop_loss)
+                quantidade_caixa = affordable_quantity(
+                    caixa_para_entrada, preco_atual,
+                    fee_rate=0.001, max_slippage=0.05, spread_pct=0.0002,
+                )
+                quantidade = min(quantidade, quantidade_caixa)
                 valor_necessario = preco_atual * quantidade
 
                 if valor_necessario <= 0 or valor_necessario > saldo_disponivel:
@@ -690,7 +741,11 @@ def executar_ordem(tipo, preco, quantidade, usar_simulacao=None, sym=None, ordem
         df = st.session_state.bot_data['dados_mercado'][sym]
         if len(df) >= 20:
             volatilidade = df['close'].pct_change().std()
-            volume_24h = df['volume'].sum() * preco
+            timeframe_minutes = {'1m': 1, '5m': 5, '15m': 15, '30m': 30, '1h': 60, '4h': 240}.get(timeframe, 1)
+            bars_per_day = 1_440 // timeframe_minutes
+            recent_volume = df['volume'].tail(min(len(df), bars_per_day))
+            # Estima 24h pela média recente caso o buffer de 500 barras seja menor.
+            volume_24h = (recent_volume.mean() * bars_per_day * preco) if not recent_volume.empty else None
 
     if usar_simulacao:
         execucao = executar_ordem_simulada(
@@ -714,6 +769,21 @@ def executar_ordem(tipo, preco, quantidade, usar_simulacao=None, sym=None, ordem
         else:
             valor_liquido = valor_total - taxas
 
+        execucao = {
+            'preco_execucao': preco_exec,
+            'quantidade_executada': quantidade_exec,
+            'valor_total': valor_total,
+            'taxas': taxas,
+            'valor_liquido': valor_liquido,
+            'executada': True,
+            'executada_completa': True,
+        }
+
+    quantidade_exec = execucao.get('quantidade_executada', 0.0)
+    if quantidade_exec <= 0:
+        logger.warning("[%s] Fill vazio; nenhuma posição ou trade foi registrado", sym)
+        return None
+
     trade = {
         'timestamp': now_brazil(),
         'symbol': sym,
@@ -729,39 +799,27 @@ def executar_ordem(tipo, preco, quantidade, usar_simulacao=None, sym=None, ordem
     }
 
     ordens = get_ordens(sym)
+    fill_result = apply_simulated_fill(
+        balance=st.session_state.bot_data['saldo_usdt'],
+        positions=ordens,
+        side=lado,
+        execution=execucao,
+        order_ref=ordem_ref,
+    )
+    st.session_state.bot_data['saldo_usdt'] = fill_result['balance']
 
     if tipo == 'COMPRA':
-        # Debita saldo e registra nova ordem na lista do par
-        st.session_state.bot_data['saldo_usdt'] -= valor_liquido
-        nova_ordem = {
-            'preco_compra':    preco_exec,
-            'quantidade':      quantidade_exec,
-            'valor_investido': valor_liquido,
-            'timestamp':       str(now_brazil()),
-        }
-        ordens.append(nova_ordem)
-        logger.info("[%s] Nova ordem adicionada. Total abertas: %d", sym, len(ordens))
-
+        fill_result['position']['timestamp'] = str(now_brazil())
+        logger.info("[%s] Fill de compra aplicado; posições abertas: %d", sym, len(ordens))
     else:
-        # Credita saldo e remove a ordem vendida da lista
-        st.session_state.bot_data['saldo_usdt'] += valor_liquido
-
-        # Determina o valor investido desta ordem especifica
-        if ordem_ref and ordem_ref in ordens:
-            valor_investido = ordem_ref.get('valor_investido', preco_exec * quantidade_exec)
-            ordens.remove(ordem_ref)
-        elif ordens:
-            # fallback: remove a ordem mais antiga (FIFO)
-            valor_investido = ordens[0].get('valor_investido', preco_exec * quantidade_exec)
-            ordens.pop(0)
-        else:
-            valor_investido = preco_exec * quantidade_exec
-
-        trade['lucro'] = valor_liquido - valor_investido
+        trade['lucro'] = fill_result['pnl']
         trade['lucro_liquido'] = trade['lucro']
-        trade['retorno'] = (trade['lucro'] / valor_investido * 100) if valor_investido > 0 else 0
+        cost_basis = fill_result['cost_basis']
+        trade['retorno'] = (trade['lucro'] / cost_basis * 100) if cost_basis > 0 else 0
         trade['retorno_liquido'] = trade['retorno']
-        logger.info("[%s] Ordem vendida. Restam abertas: %d", sym, len(ordens))
+        logger.info("[%s] Fill de venda aplicado. Restam posições: %d", sym, len(ordens))
+
+    trade['valor_liquido'] = execucao['valor_liquido']
 
     st.session_state.bot_data['trades'].append(trade)
 
@@ -799,7 +857,7 @@ def atualizar_dados_mercado(symbol_proc, novo_dado):
 # Conexao WebSocket
 # ---------------------------------------------------------------------------
 
-def carregar_historico_par(client, sym: str, tf: str, limit: int = 500) -> None:
+def carregar_historico_par(client, sym: str, tf: str, limit: int = 500):
     """
     Busca os ultimos `limit` candles de `sym` via REST e carrega direto
     no dados_mercado do session_state. Chamado uma vez na inicializacao
@@ -813,13 +871,16 @@ def carregar_historico_par(client, sym: str, tf: str, limit: int = 500) -> None:
         bars = client.get_klines(symbol=sym_rest, interval=tf, limit=limit)
         if not bars:
             logger.warning("[%s] Nenhum candle retornado", sym)
-            return
+            return None
 
         registros = []
         for b in bars:
+            # A REST API também retorna o candle corrente, ainda incompleto.
+            if len(b) > 6 and int(b[6]) >= int(time.time() * 1000):
+                continue
             registros.append({
                 'timestamp': pd.to_datetime(
-                    b[0], unit='ms'
+                    b[6] if len(b) > 6 else b[0], unit='ms'
                 ).tz_localize('UTC').tz_convert(BRAZIL_TZ).strftime('%Y-%m-%d %H:%M:%S'),
                 'open':   float(b[1]),
                 'high':   float(b[2]),
@@ -830,38 +891,37 @@ def carregar_historico_par(client, sym: str, tf: str, limit: int = 500) -> None:
             })
 
         df_hist = pd.DataFrame(registros)
+        if df_hist.empty:
+            return None
         df_hist['timestamp'] = pd.to_datetime(df_hist['timestamp'])
-
-        # Carrega diretamente no dados_mercado — substitui qualquer dado anterior
-        st.session_state.bot_data['dados_mercado'][sym] = df_hist
 
         logger.info("[%s] %d candles carregados com sucesso", sym, len(df_hist))
 
         # Persiste no banco em background (nao bloqueia a UI)
         try:
-            for r in registros:
-                registrar_candle(
-                    sym_rest, r['timestamp'],
-                    r['open'], r['high'], r['low'],
-                    r['close'], r['volume'], r['timeframe']
-                )
+            registrar_candles(sym_rest, registros)
         except Exception as e:
             logger.warning("[%s] Erro ao persistir historico no banco: %s", sym, e)
+        return df_hist
 
     except Exception as e:
         logger.exception("[%s] Erro ao carregar historico: %s", sym, e)
+        return None
 
 
 def iniciar_conexao(selected_symbols):
-    _api_key = st.session_state.get('api_key', '')
-    _api_secret = st.session_state.get('api_secret', '')
-
-    if not _api_key or not _api_secret:
+    if not selected_symbols:
+        st.error("Selecione ao menos um par para monitorar.")
         return False
+
+    candle_queue: queue.Queue = queue.Queue(maxsize=500)
+    st.session_state['_ws_candle_queue'] = candle_queue
+    twm = None
 
     try:
         logger.info("Iniciando conexao com Binance para pares: %s", selected_symbols)
-        client = Client(api_key=_api_key, api_secret=_api_secret, ping=False)
+        # Market data é público. Chaves são opcionais e não habilitam execução real.
+        client = Client(ping=False)
 
         # ---------------------------------------------------------------------
         # CARGA HISTORICA: busca 500 candles de cada par selecionado em paralelo
@@ -880,7 +940,10 @@ def iniciar_conexao(selected_symbols):
                 for future in as_completed(futures):
                     sym_done = futures[future]
                     try:
-                        future.result()
+                        hist = future.result()
+                        if hist is not None:
+                            # Somente a thread principal acessa o estado da sessão Streamlit.
+                            st.session_state.bot_data['dados_mercado'][sym_done] = hist
                         logger.info("[%s] Historico carregado", sym_done)
                     except Exception as e:
                         logger.error("[%s] Falha ao carregar historico: %s", sym_done, e)
@@ -888,7 +951,7 @@ def iniciar_conexao(selected_symbols):
         # ---------------------------------------------------------------------
         # WEBSOCKET: inicia apos o historico estar carregado
         # ---------------------------------------------------------------------
-        twm = ThreadedWebsocketManager(api_key=_api_key, api_secret=_api_secret)
+        twm = ThreadedWebsocketManager()
 
         try:
             twm.start()
@@ -896,7 +959,7 @@ def iniciar_conexao(selected_symbols):
             logger.warning("Erro ao iniciar WebsocketManager (tentativa 1): %s", e_start)
             try:
                 twm.stop()
-                twm = ThreadedWebsocketManager(api_key=_api_key, api_secret=_api_secret)
+                twm = ThreadedWebsocketManager()
                 twm.start()
             except Exception as e_retry:
                 raise RuntimeError(f"WebsocketManager falhou apos retry: {e_retry}")
@@ -904,12 +967,17 @@ def iniciar_conexao(selected_symbols):
         logger.info("ThreadedWebsocketManager iniciado.")
 
         def handle_socket_message(msg):
+            if msg.get('e') == 'error' or 'error' in msg:
+                logger.error("Erro reportado pelo WebSocket da Binance: evento de conexão falhou")
+                return
             if msg['e'] == 'kline':
                 kline = msg['k']
+                if not is_closed_candle(kline):
+                    return
                 symbol_ws = msg['s'] if 's' in msg else symbol.replace("/", "")
                 novo_dado = {
                     'timestamp': pd.to_datetime(
-                        kline['t'], unit='ms'
+                        kline['T'], unit='ms'
                     ).tz_localize('UTC').tz_convert(BRAZIL_TZ).strftime('%Y-%m-%d %H:%M:%S'),
                     'open':   float(kline['o']),
                     'high':   float(kline['h']),
@@ -929,9 +997,9 @@ def iniciar_conexao(selected_symbols):
                     logger.warning("Erro ao registrar candle no DB: %s", e)
 
                 try:
-                    _WS_CANDLE_QUEUE.put_nowait({'symbol': symbol_ws, 'dado': novo_dado})
+                    candle_queue.put_nowait({'symbol': symbol_ws, 'dado': novo_dado})
                 except queue.Full:
-                    logger.warning("Fila _WS_CANDLE_QUEUE cheia, candle descartado")
+                    logger.warning("Fila de candles cheia para esta sessão; candle descartado")
                 except Exception as e:
                     logger.exception("Erro ao enfileirar candle: %s", e)
 
@@ -948,6 +1016,11 @@ def iniciar_conexao(selected_symbols):
         return True
 
     except Exception as e:
+        if twm is not None:
+            try:
+                twm.stop()
+            except Exception:
+                logger.exception("Falha ao encerrar WebSocket após erro na conexão")
         st.error(f"Erro na conexao: {str(e)}")
         logger.exception("Erro ao iniciar conexao Binance: %s", e)
         return False
@@ -955,8 +1028,10 @@ def iniciar_conexao(selected_symbols):
 
 def parar_conexao():
     if 'conexao_websocket' in st.session_state.bot_data and st.session_state.bot_data['conexao_websocket']:
-        st.session_state.bot_data['conexao_websocket'].stop()
-        st.session_state.bot_data['conexao_websocket'] = None
+        try:
+            st.session_state.bot_data['conexao_websocket'].stop()
+        finally:
+            st.session_state.bot_data['conexao_websocket'] = None
 
 
 # ---------------------------------------------------------------------------
@@ -964,6 +1039,11 @@ def parar_conexao():
 # ---------------------------------------------------------------------------
 
 st.markdown("# Trading Bot Dashboard")
+st.warning("Modo simulado: este aplicativo não envia ordens reais para a Binance.")
+if st.session_state.get('ml_fallback_active', False):
+    st.warning("scikit-learn não pôde carregar neste ambiente; sinais usam fallback heurístico, não IA treinada.")
+if not _APP_PASSWORD:
+    st.warning("Acesso sem autenticação. Não exponha este dashboard publicamente sem configurar APP_PASSWORD ou um provedor de identidade.")
 
 col1, col2, col3, col4 = st.columns(4)
 
@@ -1003,19 +1083,14 @@ with col_status3:
     if dados_count == 200:
         logger.info("Checkpoint 200 candles â€” total trades/candles: %s", count_trades_e_candles())
     if dados_count >= 500:
-        st.session_state.bot_data['dados_mercado'][symbol] = pd.DataFrame()
-        # Invalida cache do modelo ao resetar dados
-        st.session_state.pop('rf_model_cache', None)
-        st.session_state.pop('rf_model_ultimo_treino_idx', None)
-        st.markdown("**Dados resetados para evitar sobrecarga**")
-        enviar_notificacao_telegram("Processo rodando, atingido limite de 500 candles")
+        st.markdown("**Limite de 500 candles mantido em memória**")
     st.markdown(f"**Dados:** {dados_count} candles")
 
 st.markdown("### Visao da IA - Analise Tecnica")
 
 col_ia_btn = st.columns([0.2, 0.8])[0]
 with col_ia_btn:
-    if st.button("Interpretar", use_container_width=True):
+    if st.button("Iniciar simulação", use_container_width=True, disabled=st.session_state['bot_running']):
         if not st.session_state.get('bot_running', False):
             st.session_state['bot_running'] = True
             st.session_state.bot_data['inicio_operacao'] = now_brazil()
@@ -1167,8 +1242,10 @@ if not main_df.empty:
         # nao recalcula todos a cada rerun. Usa estrategia melhorada com config do sidebar.
         try:
             if len(df) >= 100:
-                ultimo_idx_calculado = st.session_state.get('signals_ultimo_idx', 99)
-                signals_cache = st.session_state.get('signals_cache', [])
+                signal_index_key = f"signals_ultimo_idx_{symbol}"
+                signal_cache_key = f"signals_cache_{symbol}"
+                ultimo_idx_calculado = st.session_state.get(signal_index_key, 99)
+                signals_cache = st.session_state.get(signal_cache_key, [])
                 novo_inicio = max(100, ultimo_idx_calculado + 1)
 
                 if novo_inicio < len(df):
@@ -1179,7 +1256,7 @@ if not main_df.empty:
                             res = executar_estrategia_ai_melhorada(
                                 window_df, False, None,
                                 config=config_sinais,
-                                modelo_cache_fn=obter_modelo_treinado,
+                                modelo_cache_fn=lambda frame, cols: obter_modelo_treinado(frame, cols, f"{symbol}_chart"),
                             )
                             s = res.get('sinal', 'hold')
                         except Exception:
@@ -1189,8 +1266,8 @@ if not main_df.empty:
                         elif s == 'sell':
                             signals_cache.append(('sell', df.iloc[i]['timestamp'], df.iloc[i]['close']))
 
-                    st.session_state['signals_cache'] = signals_cache[-200:]
-                    st.session_state['signals_ultimo_idx'] = len(df) - 1
+                    st.session_state[signal_cache_key] = signals_cache[-200:]
+                    st.session_state[signal_index_key] = len(df) - 1
 
                 # Filtra sinais pelo periodo selecionado e pelo toggle
                 if _mostrar_sinais:
@@ -1248,7 +1325,7 @@ if not main_df.empty:
                             posicao_aberta=_pos_sidebar.get('aberta', False),
                             preco_compra=_pos_sidebar.get('preco_compra'),
                             config=config_atual,
-                            modelo_cache_fn=obter_modelo_treinado,
+                            modelo_cache_fn=lambda frame, cols: obter_modelo_treinado(frame, cols, f"{symbol}_chart"),
                         )
 
                         st.markdown("### Indicadores Atuais")
@@ -1470,7 +1547,7 @@ with col_principal:
     col_status, col_controle = st.columns([0.7, 0.3])
     with col_status:
         if st.session_state['bot_running']:
-            st.success("Bot operando - recebendo dados em tempo real")
+            st.success("Simulação ativa - recebendo candles públicos")
             st.markdown(f"**Atualizacao:** {format_time(now_brazil())}")
             posicoes_ui = st.session_state.bot_data.get('posicoes', {})
             resumo_ordens = []
@@ -1484,6 +1561,10 @@ with col_principal:
         else:
             st.markdown("**Par:** -")
             st.markdown(f"**Atualizacao:** {format_time(now_brazil())}")
+
+    with col_controle:
+        if st.session_state['bot_running'] and st.button("Parar simulação", use_container_width=True):
+            st.session_state['bot_running'] = False
 
 with col_historico:
     st.markdown("### Historico")
@@ -1516,10 +1597,15 @@ selected_symbols = st.multiselect(
 conexao_status = st.empty()
 
 if st.session_state['bot_running']:
+    current_ws_symbols = st.session_state.get('ws_symbols', [])
+    if st.session_state.get('ws_iniciado', False) and current_ws_symbols != selected_symbols:
+        parar_conexao()
+        st.session_state['ws_iniciado'] = False
     if not st.session_state.get('ws_iniciado', False):
         if iniciar_conexao(selected_symbols):
             conexao_status.success("Conexao com Binance estabelecida!")
             st.session_state['ws_iniciado'] = True
+            st.session_state['ws_symbols'] = list(selected_symbols)
         else:
             conexao_status.error("Falha ao conectar com Binance.")
             st.session_state['bot_running'] = False
@@ -1529,6 +1615,7 @@ else:
         salvar_estado_bot()   # persiste saldo e ordens abertas antes de parar
         parar_conexao()
         st.session_state['ws_iniciado'] = False
+        st.session_state['ws_symbols'] = []
 
 # ---------------------------------------------------------------------------
 # Loop de atualizacao â€” fila thread-safe do websocket
@@ -1545,7 +1632,7 @@ notify_placeholder = st.empty()
 
 # Drena todos os candles pendentes da fila thread-safe.
 # Substitui a leitura de arquivos temporarios (que causava erros no Windows).
-_ws_queue = _WS_CANDLE_QUEUE
+_ws_queue = st.session_state['_ws_candle_queue']
 _processed_symbols = set()
 while True:
     try:
@@ -1578,11 +1665,13 @@ if st.session_state['bot_running'] and not dados_novos:
         if client:
             sym_rest = symbol.replace('/', '')
             bars = client.get_klines(symbol=sym_rest, interval=timeframe, limit=1)
-            if bars:
-                b = bars[-1]
+            b = bars[-1] if bars else None
+            if b is not None and len(b) > 6 and int(b[6]) >= int(time.time() * 1000):
+                b = None
+            if b:
                 novo = {
                     'timestamp': pd.to_datetime(
-                        b[0], unit='ms'
+                        b[6] if len(b) > 6 else b[0], unit='ms'
                     ).tz_localize('UTC').tz_convert(BRAZIL_TZ).strftime('%Y-%m-%d %H:%M:%S'),
                     'open': float(b[1]),
                     'high': float(b[2]),

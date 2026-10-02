@@ -1,17 +1,18 @@
-# Crypto AI Simulator
+# Crypto Market Simulator
 
 Sistema de trading automatizado com IA para criptomoedas, integrado com múltiplas exchanges.
 
 ##  Pré-requisitos
 
-- Python 3.8 ou superior
-- Conta na Binance com API Key e Secret (opcional para testes com Mock)
+- Python 3.10 ou superior
+- Acesso à internet para consultar candles públicos da Binance
 
 ##  Instalação
 
-1. **Clone ou navegue até o diretório do projeto:**
+1. **Clone o repositório:**
    ```bash
-   cd F:\JornadaAcademica\workspace\L-TRADE AI
+   git clone https://github.com/lucaspioprogramador-cpu/projetos-portifolio.git
+   cd projetos-portifolio
    ```
 
 2. **Crie um ambiente virtual (recomendado):**
@@ -25,22 +26,27 @@ Sistema de trading automatizado com IA para criptomoedas, integrado com múltipl
    python -m pip install -r requirements.txt
    ```
 
-4. **Configure as credenciais:**
+4. **Configure as opções locais (opcional):**
 
    **Opção 1 - Arquivo .env (recomendado):**
-   - Crie um arquivo `.env` na raiz do projeto
-   - Adicione suas credenciais:
-     ```
-     BINANCE_API_KEY=sua_api_key_aqui
-     BINANCE_API_SECRET=sua_api_secret_aqui
-     DEFAULT_TIMEFRAME=1m
-     ```
+    - Copie `.env.example` para `.env` e defina senha/timeframe localmente:
+       ```dotenv
+       DEFAULT_TIMEFRAME=1m
+       APP_PASSWORD=uma_senha_forte_para_o_dashboard
+       BOT_STATE_DIR=.bot_state
+       ```
 
-   **Opção 2 - Via interface do Streamlit:**
-   - As credenciais podem ser informadas diretamente na interface
-   - Elas serão salvas em `binance_api.json`
+    Não são necessárias API keys Binance; a aplicação usa dados públicos. O token Telegram, se usado, vale apenas para a sessão.
+
+5. **Execute os testes:**
+   ```bash
+   python -m pip install -r requirements-dev.txt
+   python -m pytest -q
+   ```
 
 ##  Como Usar
+
+Para ressalvas sobre guias históricos da pasta `docs/`, consulte [docs/ESCOPO_ATUAL.md](docs/ESCOPO_ATUAL.md).
 
 ### Aplicação Principal (Bot de Trading)
 
@@ -49,12 +55,14 @@ Execute o aplicativo principal:
 streamlit run ui/main_app.py
 ```
 
-**Funcionalidades:**
+**Funcionalidades em modo de simulação:**
 - Monitoramento em tempo real via WebSocket
-- Trading automatizado com estratégias de IA
+- Simulação de sinais e operações com estratégia de IA
 - Controle de risco (Stop Loss, Take Profit)
 - Visualização de gráficos e métricas
 - Relatórios de performance
+
+Se o binário do scikit-learn não puder carregar no sistema, a interface informa e usa uma regra determinística de indicadores como fallback. Esse fallback não é um modelo de IA treinado nem foi validado como estratégia rentável.
 
 ### Visualização de Sinais
 
@@ -63,7 +71,7 @@ Execute o aplicativo de visualização:
 streamlit run ui/viz_app.py
 ```
 
-**Funcionalidades:**
+**Funcionalidades em modo de simulação:**
 - Análise histórica de estratégias
 - Visualização de sinais de compra/venda
 - Teste com dados Mock ou Binance
@@ -103,11 +111,11 @@ project/
 
 ## ⚙️ Configuração
 
-### Variáveis de Ambiente (.env)
+### Variáveis locais (.env)
 
-- `BINANCE_API_KEY`: Sua API Key da Binance
-- `BINANCE_API_SECRET`: Sua API Secret da Binance
-- `DEFAULT_TIMEFRAME`: Timeframe padrão (1m, 5m, 15m, 30m, 1h, 4h)
+- `DEFAULT_TIMEFRAME`: timeframe padrão (1m, 5m, 15m, 30m, 1h, 4h)
+- `APP_PASSWORD`: senha básica opcional para proteger o dashboard local
+- `BOT_STATE_DIR`: diretório gravável para snapshots locais de simulação (padrão `.bot_state`)
 
 ### Parâmetros de Trading
 
@@ -120,10 +128,13 @@ Configure na interface do Streamlit:
 ## 🔒 Segurança
 
 ⚠️ **IMPORTANTE:**
-- Nunca compartilhe suas credenciais da API
-- Use apenas permissões de leitura para testes
-- O arquivo `.env` e `binance_api.json` estão no `.gitignore` (não são commitados)
-- Para produção, considere usar variáveis de ambiente do sistema
+- Não insira credenciais Binance: este protótipo não precisa delas
+- Este projeto **não envia ordens reais** para a Binance; o dashboard deve permanecer em modo simulado
+- Não crie API keys Binance para este protótipo; ele usa apenas dados públicos
+- O arquivo `.env`, os arquivos JSON legados e os dados locais estão no `.gitignore` (não são commitados)
+- O dashboard não está protegido por padrão. Configure `APP_PASSWORD` para a barreira de acesso básica ou use autenticação gerenciada por proxy/identidade antes de expor a aplicação na internet
+- `APP_PASSWORD` protege o acesso à UI, mas não substitui um provedor de identidade, rate limiting ou HTTPS
+- Nunca execute o bot com dinheiro real sem uma implementação auditada de ordens, reconciliação de saldo e testes em testnet
 
 ## 📊 Estratégias Disponíveis
 

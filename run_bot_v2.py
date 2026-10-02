@@ -25,8 +25,8 @@ print()
 # Testa imports
 print("Testando imports...")
 try:
-    from config.settings import BINANCE_API_KEY
-    print("OK - Config carregada")
+    from config.settings import DEFAULT_TIMEFRAME
+    print(f"OK - Config carregada (timeframe padrão: {DEFAULT_TIMEFRAME})")
 except Exception as e:
     print("ERRO ao carregar config: " + str(e))
     sys.exit(1)

@@ -1,24 +1,26 @@
-# ?? Explicação Completa da UI - L-Trade-AI
+> **Nota de seguranÃ§a/escopo:** esta documentaÃ§Ã£o contÃ©m descriÃ§Ãµes histÃ³ricas. A aplicaÃ§Ã£o atual coleta dados e simula trades; ela nÃ£o envia ordens reais. Credenciais digitadas na interface permanecem somente na sessÃ£o. Consulte [README.md](../README.md) e [GUIA_RAPIDO_RODAR.md](../GUIA_RAPIDO_RODAR.md) para instruÃ§Ãµes vigentes.
+# ?? Explicaï¿½ï¿½o Completa da UI - L-Trade-AI
+# ?? Explicaï¿½ï¿½o Completa da UI - L-Trade-AI
 
-## ?? Visão Geral
+## ?? Visï¿½o Geral
 
-A aplicação possui **duas interfaces principais** construídas com **Streamlit**, uma framework Python para criar dashboards web interativos.
+A aplicaï¿½ï¿½o possui **duas interfaces principais** construï¿½das com **Streamlit**, uma framework Python para criar dashboards web interativos.
 
 ---
 
 ## 1?? **main_app.py** - Bot de Trading em Tempo Real
 
-### ?? Propósito
-Interface principal para **monitoramento e execução de trading automatizado** na Binance com dados em tempo real via WebSocket.
+### ?? Propï¿½sito
+Interface principal para **monitoramento e execuï¿½ï¿½o de trading automatizado** na Binance com dados em tempo real via WebSocket.
 
 ### ??? Estrutura da Interface
 
 #### **A. Sidebar (Painel Esquerdo)**
-Controla todas as configurações do bot:
+Controla todas as configuraï¿½ï¿½es do bot:
 
 ```
 ???????????????????????????????????
-?  CONFIGURAÇÕES DO BOT            ?
+?  CONFIGURAï¿½ï¿½ES DO BOT            ?
 ???????????????????????????????????
 ? ?? API Key (password)            ?
 ? ?? API Secret (password)         ?
@@ -28,7 +30,7 @@ Controla todas as configurações do bot:
 ?                                  ?
 ? ? Status das Credenciais        ?
 ?                                  ?
-? ?? Par de Negociação: BTC/USDT   ?
+? ?? Par de Negociaï¿½ï¿½o: BTC/USDT   ?
 ? ?? Timeframe: 5m                 ?
 ?                                  ?
 ? ?? Saldo Inicial: 1000 USDT      ?
@@ -36,10 +38,10 @@ Controla todas as configurações do bot:
 ? ?? Stop Loss: 2.0%               ?
 ? ?? Take Profit: 3.0%             ?
 ?                                  ?
-? ?? [Configurações Avançadas]     ?
-?   ?? Usar Simulação Realista     ?
-?   ?? Usar Estratégia Melhorada   ?
-?   ?? Mostrar Detalhes Execução   ?
+? ?? [Configuraï¿½ï¿½es Avanï¿½adas]     ?
+?   ?? Usar Simulaï¿½ï¿½o Realista     ?
+?   ?? Usar Estratï¿½gia Melhorada   ?
+?   ?? Mostrar Detalhes Execuï¿½ï¿½o   ?
 ?                                  ?
 ? ?? [Iniciar Bot]                 ?
 ? ?? [Parar Bot]                   ?
@@ -48,39 +50,39 @@ Controla todas as configurações do bot:
 
 **Funcionalidades:**
 - **Credenciais**: Carrega de `.env` ou arquivo local `binance_api.json`
-- **Parâmetros de Trading**: Configure o par, timeframe e estratégia
+- **Parï¿½metros de Trading**: Configure o par, timeframe e estratï¿½gia
 - **Gerenciamento de Risco**: Define saldo inicial, risco por trade, Stop Loss e Take Profit
 - **Controles**: Inicia/para o bot
-- **Modo Simulação**: Testa estratégias sem risco real
+- **Modo Simulaï¿½ï¿½o**: Testa estratï¿½gias sem risco real
 
 ---
 
-#### **B. Seção Principal**
+#### **B. Seï¿½ï¿½o Principal**
 
-##### **1. Status e Métricas em Tempo Real**
+##### **1. Status e Mï¿½tricas em Tempo Real**
 Exibe indicadores-chave do bot:
-- **Saldo Atual**: Montante em USDT disponível
-- **Saldo Inicial**: Referência para cálculo de retorno
-- **Posição Aberta**: Se há uma compra ativa
-- **Preço de Entrada**: Preço em que entrou na posição
+- **Saldo Atual**: Montante em USDT disponï¿½vel
+- **Saldo Inicial**: Referï¿½ncia para cï¿½lculo de retorno
+- **Posiï¿½ï¿½o Aberta**: Se hï¿½ uma compra ativa
+- **Preï¿½o de Entrada**: Preï¿½o em que entrou na posiï¿½ï¿½o
 - **Quantidade**: Quantidade de criptomoeda em posse
 
-##### **2. Gráfico Principal - Análise Técnica**
-Mostra o preço com indicadores:
-- **Preço (linha cinza)**: Cotação em tempo real
-- **Médias Móveis** (MA 5 e MA 20): Sinais simples de compra/venda
-- **Bollinger Bands**: Detecção de sobrevenda/sobrecompra
-- **Volume**: Força das movimentações
+##### **2. Grï¿½fico Principal - Anï¿½lise Tï¿½cnica**
+Mostra o preï¿½o com indicadores:
+- **Preï¿½o (linha cinza)**: Cotaï¿½ï¿½o em tempo real
+- **Mï¿½dias Mï¿½veis** (MA 5 e MA 20): Sinais simples de compra/venda
+- **Bollinger Bands**: Detecï¿½ï¿½o de sobrevenda/sobrecompra
+- **Volume**: Forï¿½a das movimentaï¿½ï¿½es
 
-##### **3. Gráfico MACD**
-Indicador de convergência/divergência de médias móveis para detectar mudanças de tendência
+##### **3. Grï¿½fico MACD**
+Indicador de convergï¿½ncia/divergï¿½ncia de mï¿½dias mï¿½veis para detectar mudanï¿½as de tendï¿½ncia
 
-##### **4. Estratégia de IA**
-Análise avançada com múltiplos indicadores:
+##### **4. Estratï¿½gia de IA**
+Anï¿½lise avanï¿½ada com mï¿½ltiplos indicadores:
 - RSI (Relative Strength Index)
 - ADX (Average Directional Index)
 - Volume Ratio
-- Confiança percentual do sinal
+- Confianï¿½a percentual do sinal
 
 ---
 
@@ -88,26 +90,26 @@ Análise avançada com múltiplos indicadores:
 
 ```
 ???????????????????????????????????????????????????????
-?              CICLO DE OPERAÇÃO                       ?
+?              CICLO DE OPERAï¿½ï¿½O                       ?
 ???????????????????????????????????????????????????????
 ?                                                      ?
 ?  1??  Usuario clica "Iniciar Bot"                   ?
 ?      ?                                               ?
 ?  2??  Conecta ao WebSocket da Binance               ?
 ?      ?                                               ?
-?  3??  Recebe dados de preço em tempo real (1m, 5m)  ?
+?  3??  Recebe dados de preï¿½o em tempo real (1m, 5m)  ?
 ?      ?                                               ?
 ?  4??  Armazena em DataFrame com 500 candles         ?
 ?      ?                                               ?
 ?  5??  Processa sinais de compra/venda               ?
-?      ?? Estratégia Melhorada (IA): Alta confiança  ?
-?      ?? Fallback (Médias Móveis): Simples          ?
+?      ?? Estratï¿½gia Melhorada (IA): Alta confianï¿½a  ?
+?      ?? Fallback (Mï¿½dias Mï¿½veis): Simples          ?
 ?      ?                                               ?
 ?  6??  Verifica Stop Loss e Take Profit              ?
 ?      ?                                               ?
-?  7??  Executa ordem (com simulação de slippage)     ?
+?  7??  Executa ordem (com simulaï¿½ï¿½o de slippage)     ?
 ?      ?                                               ?
-?  8??  Atualiza saldo e histórico de trades          ?
+?  8??  Atualiza saldo e histï¿½rico de trades          ?
 ?      ?                                               ?
 ?  9??  Dashboard atualiza em tempo real               ?
 ?      ?                                               ?
@@ -118,87 +120,87 @@ Análise avançada com múltiplos indicadores:
 
 ---
 
-### ?? Histórico de Trades
+### ?? Histï¿½rico de Trades
 
 Tabela mostrando cada trade executado:
 
-| Timestamp | Par | Tipo | Preço | Quantidade | Valor | Taxas | Slippage | Lucro |
+| Timestamp | Par | Tipo | Preï¿½o | Quantidade | Valor | Taxas | Slippage | Lucro |
 |-----------|-----|------|-------|-----------|-------|-------|----------|-------|
 | 25/02/2026 14:30 | BTC/USDT | COMPRA | 42500.00 | 0.0235 | 1000.00 | 1.00 | 0.05% | - |
 | 25/02/2026 14:45 | BTC/USDT | VENDA | 43000.00 | 0.0235 | 1010.50 | 1.01 | 0.08% | +8.49 |
 
 ---
 
-### ?? Principais Funções
+### ?? Principais Funï¿½ï¿½es
 
 #### **executar_ordem(tipo, preco, quantidade)**
 ```python
 - Tipo: 'COMPRA' ou 'VENDA'
-- Executa com simulação realista de:
-  ? Slippage (desvio de preço)
-  ? Taxas (comissão Binance: 0.1%)
-  ? Execução parcial
+- Executa com simulaï¿½ï¿½o realista de:
+  ? Slippage (desvio de preï¿½o)
+  ? Taxas (comissï¿½o Binance: 0.1%)
+  ? Execuï¿½ï¿½o parcial
   ? Volatilidade do ativo
 ```
 
 #### **processar_sinais()**
 ```python
-Lógica de decisão:
-1. Se posição aberta:
-   - Verifica Stop Loss ? VENDE se preço cai 2%
+Lï¿½gica de decisï¿½o:
+1. Se posiï¿½ï¿½o aberta:
+   - Verifica Stop Loss ? VENDE se preï¿½o cai 2%
    - Verifica Take Profit ? VENDE se lucra 4.5%
 
-2. Se sem posição:
+2. Se sem posiï¿½ï¿½o:
    - Usa IA melhorada para detectar setup de compra
-   - Confiança mínima: 60%
+   - Confianï¿½a mï¿½nima: 60%
    - RSI entre 30-75
-   - ADX > 20 (tendência clara)
+   - ADX > 20 (tendï¿½ncia clara)
    - Volume adequado
 
-3. Fallback para Médias Móveis se erro
+3. Fallback para Mï¿½dias Mï¿½veis se erro
 ```
 
 #### **iniciar_conexao()**
 ```python
-- Estabelece conexão ThreadedWebsocketManager
+- Estabelece conexï¿½o ThreadedWebsocketManager
 - Inicia socket para cada par selecionado
 - Callback processa cada novo candle
-- Salva dados em arquivo temporário JSON
+- Salva dados em arquivo temporï¿½rio JSON
 ```
 
 ---
 
-### ?? Configurações Avançadas
+### ?? Configuraï¿½ï¿½es Avanï¿½adas
 
 ```
 ???????????????????????????????????????????????????????
-?           CONFIGURAÇÕES AVANÇADAS                    ?
+?           CONFIGURAï¿½ï¿½ES AVANï¿½ADAS                    ?
 ???????????????????????????????????????????????????????
 ?                                                      ?
-? ?? Usar Simulação Realista                          ?
+? ?? Usar Simulaï¿½ï¿½o Realista                          ?
 ?    ?? Ativa: slippage baseado em volatilidade       ?
 ?                                                      ?
-? ?? Usar Estratégia Melhorada (IA)                   ?
-?    ?? Desativa: cai para médias móveis simples      ?
+? ?? Usar Estratï¿½gia Melhorada (IA)                   ?
+?    ?? Desativa: cai para mï¿½dias mï¿½veis simples      ?
 ?                                                      ?
-? ?? Mostrar Detalhes de Execução                     ?
-?    ?? Exibe: slippage, taxas, execução parcial    ?
+? ?? Mostrar Detalhes de Execuï¿½ï¿½o                     ?
+?    ?? Exibe: slippage, taxas, execuï¿½ï¿½o parcial    ?
 ?                                                      ?
 ???????????????????????????????????????????????????????
 ```
 
 ---
 
-## 2?? **viz_app.py** - Visualização de Sinais da IA
+## 2?? **viz_app.py** - Visualizaï¿½ï¿½o de Sinais da IA
 
-### ?? Propósito
-Interface de **backtesting e análise** de sinais gerados pela estratégia de IA.
+### ?? Propï¿½sito
+Interface de **backtesting e anï¿½lise** de sinais gerados pela estratï¿½gia de IA.
 
 ### ??? Estrutura
 
 ```
 ???????????????????????????????????????
-? Visualização das Intenções da IA    ?
+? Visualizaï¿½ï¿½o das Intenï¿½ï¿½es da IA    ?
 ???????????????????????????????????????
 ?                                      ?
 ? ?? Escolha o par:                   ?
@@ -209,18 +211,18 @@ Interface de **backtesting e análise** de sinais gerados pela estratégia de IA.
 ?    ? Mock: Simula dados             ?
 ?    ? Binance: Dados reais           ?
 ?                                      ?
-? ?? [Rodar análise agora]            ?
+? ?? [Rodar anï¿½lise agora]            ?
 ?                                      ?
-? Aguardando análise...               ?
+? Aguardando anï¿½lise...               ?
 ?                                      ?
 ???????????????????????????????????????
 ```
 
 ---
 
-### ?? Resultados da Análise
+### ?? Resultados da Anï¿½lise
 
-Após clicar "Rodar análise":
+Apï¿½s clicar "Rodar anï¿½lise":
 
 #### **Tabela de Sinais**
 ```
@@ -232,24 +234,24 @@ timestamp       | close    | sinal
 ...
 ```
 
-#### **Gráfico Interativo**
-- **Linha cinza**: Preço do ativo
-- **Triângulo verde ?**: Sinal de COMPRA
-- **Triângulo vermelho ?**: Sinal de VENDA
+#### **Grï¿½fico Interativo**
+- **Linha cinza**: Preï¿½o do ativo
+- **Triï¿½ngulo verde ?**: Sinal de COMPRA
+- **Triï¿½ngulo vermelho ?**: Sinal de VENDA
 
 ---
 
-### ?? Fluxo de Análise
+### ?? Fluxo de Anï¿½lise
 
 ```
 1?? User seleciona par e fonte
-2?? Clica "Rodar análise"
+2?? Clica "Rodar anï¿½lise"
 3?? Loop: Para cada candle (50 em diante)
    ?? Passa janela de dados para IA
    ?? IA gera sinal: BUY, SELL ou HOLD
-   ?? Armazena sinal no histórico
-4?? Exibe tabela com últimos 50 sinais
-5?? Plota gráfico com preço e sinais
+   ?? Armazena sinal no histï¿½rico
+4?? Exibe tabela com ï¿½ltimos 50 sinais
+5?? Plota grï¿½fico com preï¿½o e sinais
 ```
 
 ---
@@ -264,32 +266,32 @@ Filtrar por sinal: [Todos ?]
                    ?? hold
 ```
 
-Permite analisar apenas um tipo de sinal sem refazer a análise.
+Permite analisar apenas um tipo de sinal sem refazer a anï¿½lise.
 
 ---
 
-## ?? Integração Entre as UIs
+## ?? Integraï¿½ï¿½o Entre as UIs
 
 ### **main_app.py** (Bot Ativo)
 ```
-Tempo Real ? WebSocket Binance ? Estratégia IA ? Execução Automatizada
+Tempo Real ? WebSocket Binance ? Estratï¿½gia IA ? Execuï¿½ï¿½o Automatizada
    ?                                                      ?
 Dados ao vivo                                    Trades reais com $
 ```
 
 ### **viz_app.py** (Backtesting)
 ```
-Dados Históricos ? Estratégia IA ? Análise de Sinais ? Gráficos
+Dados Histï¿½ricos ? Estratï¿½gia IA ? Anï¿½lise de Sinais ? Grï¿½ficos
                                         ?
                               Testa sem executar trades
 ```
 
 ---
 
-## ?? Detalhes Técnicos
+## ?? Detalhes Tï¿½cnicos
 
-### **Estado da Sessão (Session State)**
-Persiste dados durante a sessão do Streamlit:
+### **Estado da Sessï¿½o (Session State)**
+Persiste dados durante a sessï¿½o do Streamlit:
 ```python
 st.session_state = {
     'bot_data': {
@@ -323,85 +325,85 @@ ThreadedWebsocketManager executa em thread separada:
 ????????????????????????
 ```
 
-### **Indicadores Técnicos Calculados**
+### **Indicadores Tï¿½cnicos Calculados**
 
-| Indicador | Função | Sinal |
+| Indicador | Funï¿½ï¿½o | Sinal |
 |-----------|--------|-------|
-| **MA 5 / MA 20** | Médias Móveis | MA 5 > MA 20 = COMPRA |
-| **Bollinger Bands** | Volatilidade | Preço < banda inf = Sobrevenda |
+| **MA 5 / MA 20** | Mï¿½dias Mï¿½veis | MA 5 > MA 20 = COMPRA |
+| **Bollinger Bands** | Volatilidade | Preï¿½o < banda inf = Sobrevenda |
 | **MACD** | Momentum | Histograma positivo = COMPRA |
-| **RSI** | Força | RSI < 30 = Sobrevenda / RSI > 70 = Sobrecompra |
-| **ADX** | Tendência | ADX > 20 = Tendência clara |
-| **Volume** | Confirmação | Volume alto = Confiança |
+| **RSI** | Forï¿½a | RSI < 30 = Sobrevenda / RSI > 70 = Sobrecompra |
+| **ADX** | Tendï¿½ncia | ADX > 20 = Tendï¿½ncia clara |
+| **Volume** | Confirmaï¿½ï¿½o | Volume alto = Confianï¿½a |
 
 ---
 
-## ?? Fluxo de Decisão de Compra/Venda
+## ?? Fluxo de Decisï¿½o de Compra/Venda
 
-### **Decisão de COMPRA**
+### **Decisï¿½o de COMPRA**
 ```
-1. Sem posição aberta? ?
-2. Confiança IA > 60%? ?
+1. Sem posiï¿½ï¿½o aberta? ?
+2. Confianï¿½a IA > 60%? ?
 3. RSI entre 30-75? ?
 4. ADX > 20? ?
-5. Volume > 1.0x média? ?
+5. Volume > 1.0x mï¿½dia? ?
    ?
    ? COMPRA: Calcula quantidade baseada em risco
 ```
 
-### **Decisão de VENDA**
+### **Decisï¿½o de VENDA**
 ```
-Cenário 1: Stop Loss
+Cenï¿½rio 1: Stop Loss
 ?????????????????????
-Preço < (Preço Compra × 0.98)?
+Preï¿½o < (Preï¿½o Compra ï¿½ 0.98)?
    ? ? VENDA: "STOP LOSS ATIVADO"
 
-Cenário 2: Take Profit
+Cenï¿½rio 2: Take Profit
 ??????????????????????
-Preço > (Preço Compra × 1.045)?
+Preï¿½o > (Preï¿½o Compra ï¿½ 1.045)?
    ? ? VENDA: "TAKE PROFIT ATIVADO + Lucro %"
 
-Cenário 3: Sinal IA
+Cenï¿½rio 3: Sinal IA
 ??????????????????
-IA gera SELL + Confiança > 50%?
+IA gera SELL + Confianï¿½a > 50%?
    ? ? VENDA: "Sinal IA gerado"
 ```
 
 ---
 
-## ?? Exemplo Prático de Trade
+## ?? Exemplo Prï¿½tico de Trade
 
 ```
 ? 14:30 - COMPRA
 ???????????????????????????????????????????
-? Preço: 42500.00 USDT/BTC                ?
+? Preï¿½o: 42500.00 USDT/BTC                ?
 ? Saldo: 1000.00 USDT                     ?
 ? Risco: 1.0%                             ?
 ? Stop Loss: 2%                           ?
 ?                                          ?
-? Cálculo:                                 ?
-? Risco = 1000 × 1% = 10 USDT             ?
-? SL = 42500 × 2% = 850 USDT              ?
-? Quantidade = 10 / (42500 × 2%) = 0.0235 BTC ?
+? Cï¿½lculo:                                 ?
+? Risco = 1000 ï¿½ 1% = 10 USDT             ?
+? SL = 42500 ï¿½ 2% = 850 USDT              ?
+? Quantidade = 10 / (42500 ï¿½ 2%) = 0.0235 BTC ?
 ?                                          ?
 ? ?? Investido: 1000 USDT                 ?
 ? ?? Taxa Binance: -1 USDT                ?
 ? ?? Slippage: -0.05%                     ?
 ???????????????????????????????????????????
 ? Saldo restante: 0.00 USDT               ?
-? Posição: 0.0235 BTC                     ?
+? Posiï¿½ï¿½o: 0.0235 BTC                     ?
 ???????????????????????????????????????????
 
 ? 14:45 - VENDA (Take Profit)
 ???????????????????????????????????????????
-? Preço: 43000.00 USDT/BTC                ?
+? Preï¿½o: 43000.00 USDT/BTC                ?
 ? Quantidade: 0.0235 BTC                  ?
 ?                                          ?
-? Recebido: 43000 × 0.0235 = 1010.50 USDT?
+? Recebido: 43000 ï¿½ 0.0235 = 1010.50 USDT?
 ? Taxa Binance: -1.01 USDT                ?
 ? Slippage: -0.08%                        ?
 ???????????????????????????????????????????
-? ?? Lucro Líquido: +8.49 USDT            ?
+? ?? Lucro Lï¿½quido: +8.49 USDT            ?
 ? ?? Retorno: +0.849%                     ?
 ? Saldo Final: 1008.49 USDT               ?
 ???????????????????????????????????????????
@@ -423,43 +425,43 @@ streamlit run ui/main_app.py
 streamlit run ui/viz_app.py --logger.level=debug
 ```
 
-### **Configuração Recomendada**
+### **Configuraï¿½ï¿½o Recomendada**
 1. ? Configure credenciais Binance
-2. ? Ative "Usar Simulação Realista"
-3. ? Ative "Usar Estratégia Melhorada (IA)"
+2. ? Ative "Usar Simulaï¿½ï¿½o Realista"
+3. ? Ative "Usar Estratï¿½gia Melhorada (IA)"
 4. ? Defina saldo inicial conservador (1000-5000 USDT)
 5. ? Risco por trade: 0.5-1.5%
 6. ? Stop Loss: 2-3%
 7. ? Take Profit: 3-5%
-8. ? Teste primeiro em visualização (viz_app.py)
-9. ? Após validar, execute em tempo real
+8. ? Teste primeiro em visualizaï¿½ï¿½o (viz_app.py)
+9. ? Apï¿½s validar, execute em tempo real
 
 ---
 
 ## ?? Avisos Importantes
 
 ```
-?? MODO SIMULAÇÃO
-?? Não executa trades reais
-?? Simula slippage, taxas, execução parcial
-?? Ideal para validar estratégia
+?? MODO SIMULAï¿½ï¿½O
+?? Nï¿½o executa trades reais
+?? Simula slippage, taxas, execuï¿½ï¿½o parcial
+?? Ideal para validar estratï¿½gia
 
 ?? MODO REAL
 ?? Executa trades com dinheiro real
-?? Use credenciais de sub-conta (segurança)
+?? Use credenciais de sub-conta (seguranï¿½a)
 ?? Comece com saldo pequeno
 ?? Monitore sempre o bot
 
 ?? RISCOS
 ?? Volatilidade pode gerar perdas
-?? WebSocket pode cair (reconecta automático)
+?? WebSocket pode cair (reconecta automï¿½tico)
 ?? Slippage reduz lucros
 ?? Sempre tenha stop loss ativo
 ```
 
 ---
 
-## ?? Métricas Monitoradas
+## ?? Mï¿½tricas Monitoradas
 
 ```
 Dashboard em tempo real mostra:
@@ -469,40 +471,40 @@ Dashboard em tempo real mostra:
    ?? Retorno Total (%)
    ?? Win Rate (% trades lucrativos)
 
-2. POSIÇÃO ATUAL
+2. POSIï¿½ï¿½O ATUAL
    ?? Status (Aberta/Fechada)
-   ?? Preço de Entrada
-   ?? Preço Atual
-   ?? Lucro/Prejuízo (P&L)
+   ?? Preï¿½o de Entrada
+   ?? Preï¿½o Atual
+   ?? Lucro/Prejuï¿½zo (P&L)
    ?? Quantidade em Posse
 
 3. EVENTOS
-   ?? Último sinal da IA
-   ?? Confiança do sinal
-   ?? Razão do sinal
+   ?? ï¿½ltimo sinal da IA
+   ?? Confianï¿½a do sinal
+   ?? Razï¿½o do sinal
    ?? Timestamp
 
 4. TRADES
-   ?? Número total
-   ?? Últimos 10 trades
+   ?? Nï¿½mero total
+   ?? ï¿½ltimos 10 trades
    ?? Lucro por trade
-   ?? Histórico completo (CSV export)
+   ?? Histï¿½rico completo (CSV export)
 ```
 
 ---
 
-## ?? Conclusão
+## ?? Conclusï¿½o
 
 A UI do L-Trade-AI oferece:
 
 ? **main_app.py**: Trading automatizado em tempo real com IA
-? **viz_app.py**: Análise e backtesting de sinais
-? **Risco Controlado**: Stop loss e take profit automáticos
-? **Simulação**: Teste sem risco real antes de operar
-? **Indicadores Avançados**: MACD, Bollinger, RSI, ADX, Volume
-? **Execução Realista**: Slippage, taxas e execução parcial simulados
-? **Interface Intuitiva**: Streamlit para fácil uso
+? **viz_app.py**: Anï¿½lise e backtesting de sinais
+? **Risco Controlado**: Stop loss e take profit automï¿½ticos
+? **Simulaï¿½ï¿½o**: Teste sem risco real antes de operar
+? **Indicadores Avanï¿½ados**: MACD, Bollinger, RSI, ADX, Volume
+? **Execuï¿½ï¿½o Realista**: Slippage, taxas e execuï¿½ï¿½o parcial simulados
+? **Interface Intuitiva**: Streamlit para fï¿½cil uso
 
 ---
 
-*Última atualização: 25/02/2026*
+*ï¿½ltima atualizaï¿½ï¿½o: 25/02/2026*
