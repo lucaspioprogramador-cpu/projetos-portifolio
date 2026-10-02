@@ -25,6 +25,7 @@ from pathlib import Path
 from config.settings import DEFAULT_TIMEFRAME
 from db.database import registrar_candle, registrar_candles, get_candles, registrar_trade, count_trades_e_candles, get_trades
 from core.data import is_closed_candle
+from ui.chart_utils import filter_events_to_window, padded_chart_range
 import warnings
 
 warnings.filterwarnings(
@@ -1165,6 +1166,7 @@ if not main_df.empty:
     df = df.sort_values('timestamp').drop_duplicates('timestamp').reset_index(drop=True)
 
     if not df.empty:
+        _chart_start, _chart_end = padded_chart_range(df['timestamp'])
         _preco_inicial = float(df['close'].iloc[0])
         _preco_atual = float(df['close'].iloc[-1])
         _variacao_periodo = ((_preco_atual / _preco_inicial) - 1) * 100 if _preco_inicial else 0.0
@@ -1255,7 +1257,10 @@ if not main_df.empty:
 
         # Trades reais do banco — compras e vendas executadas pelo bot
         try:
-            _trades_df = get_trades(symbol=symbol, since=_since) if _mostrar_trades else pd.DataFrame()
+            _trades_df = get_trades(symbol=symbol) if _mostrar_trades else pd.DataFrame()
+            _trades_df = filter_events_to_window(
+                _trades_df, _chart_start, _chart_end, timestamp_column='timestamp'
+            )
             if not _trades_df.empty:
                 _compras = _trades_df[_trades_df['tipo'] == 'COMPRA']
                 _vendas  = _trades_df[_trades_df['tipo'] == 'VENDA']
@@ -1344,11 +1349,12 @@ if not main_df.empty:
 
                 # Filtra sinais pelo periodo selecionado e pelo toggle
                 if _mostrar_sinais:
-                    _since_dt = pd.to_datetime(_since) if _since else None
-                    _filtered = [
-                        (st2, t, p) for st2, t, p in signals_cache
-                        if _since_dt is None or pd.to_datetime(t) >= _since_dt
-                    ]
+                    _visible_signals = filter_events_to_window(
+                        pd.DataFrame(signals_cache, columns=['signal', 'timestamp', 'price']),
+                        _chart_start,
+                        _chart_end,
+                    ) if signals_cache else pd.DataFrame(columns=['signal', 'timestamp', 'price'])
+                    _filtered = list(_visible_signals.itertuples(index=False, name=None))
                     _buys  = [(t, p) for st2, t, p in _filtered if st2 == 'buy']
                     _sells = [(t, p) for st2, t, p in _filtered if st2 == 'sell']
 
@@ -1585,7 +1591,11 @@ if not main_df.empty:
             showlegend=True,
             xaxis_rangeslider_visible=False,
         )
-        fig.update_xaxes(showgrid=True, gridcolor='rgba(148,163,184,0.10)', zeroline=False, rangeslider_visible=False)
+        fig.update_xaxes(
+            showgrid=True, gridcolor='rgba(148,163,184,0.10)',
+            zeroline=False, rangeslider_visible=False,
+            range=[_chart_start, _chart_end],
+        )
         fig.update_yaxes(showgrid=True, gridcolor='rgba(148,163,184,0.10)', zeroline=False)
         fig.update_yaxes(range=[_y_min - _y_pad, _y_max + _y_pad], tickformat=',.4~f', side='right', row=1, col=1)
         fig.update_yaxes(tickformat='~s', side='right', row=2, col=1)

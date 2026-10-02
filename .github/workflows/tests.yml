@@ -18,5 +18,5 @@ jobs:
           python-version: ${{ matrix.python-version }}
           cache: pip
       - run: python -m pip install -r requirements-dev.txt
-      - run: python -m ruff check core/risk.py core/execution.py core/simulator.py core/data.py backtest/runner.py backtest/metrics.py strategies/features.py strategies/ai_strategy_melhorada.py exchanges/binance.py exchanges/mock.py tests
+      - run: python -m ruff check core/risk.py core/execution.py core/simulator.py core/data.py backtest/runner.py backtest/metrics.py strategies/features.py strategies/ai_strategy_melhorada.py exchanges/binance.py exchanges/mock.py ui/chart_utils.py tests
       - run: python -m pytest -q
