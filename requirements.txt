@@ -1,0 +1,12 @@
+pandas
+numpy
+scikit-learn
+streamlit
+matplotlib
+ccxt
+python-binance
+plotly
+pytz
+python-dotenv
+ta
+python-telegram-bot

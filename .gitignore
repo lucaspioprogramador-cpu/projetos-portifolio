@@ -1,0 +1,23 @@
+# Secrets and local configuration
+.env
+.env.*
+!.env.example
+binance_api.json
+telegram_config.json
+.streamlit/
+
+# Python-generated files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Runtime data, logs, and generated reports
+*.db
+*.sqlite
+*.sqlite3
+*.log
+output.txt
+relatorios/*.csv
+
+# Local editor settings
+.vscode/
