@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 import numpy as np
 
 from core.execution import apply_simulated_fill, build_order
-from core.simulator import OrderSimulator
+from core.simulator import DEFAULT_MAX_SLIPPAGE, OrderSimulator
 
 
 class ExecutionTests(unittest.TestCase):
@@ -71,7 +71,18 @@ class ExecutionTests(unittest.TestCase):
         self.assertEqual(buy, buy_again)
         self.assertAlmostEqual(buy["valor_liquido"], buy["valor_total"] + buy["taxas"])
         self.assertAlmostEqual(sell["valor_liquido"], sell["valor_total"] - sell["taxas"])
-        self.assertLessEqual(buy["slippage_pct"], 0.05)
+        self.assertLessEqual(buy["slippage_pct"], DEFAULT_MAX_SLIPPAGE)
+
+    def test_volatile_fill_stays_within_documented_price_impact_cap(self):
+        simulator = OrderSimulator(rng=np.random.default_rng(9))
+        result = simulator.simular_execucao(
+            "buy", 0.0028, 85_230.62, volatilidade=0.02,
+            timestamp=datetime(2026, 10, 2, tzinfo=timezone.utc),
+        )
+        total_impact = result["preco_execucao"] / result["preco_solicitado"] - 1
+        max_total_impact = (1 + DEFAULT_MAX_SLIPPAGE) * (1 + simulator.spread_pct / 2) - 1
+        self.assertLessEqual(result["slippage_pct"], DEFAULT_MAX_SLIPPAGE)
+        self.assertLessEqual(total_impact, max_total_impact)
 
     def test_limit_order_does_not_fill_when_price_is_unfavorable(self):
         simulator = OrderSimulator(rng=np.random.default_rng(1))

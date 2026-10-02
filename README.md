@@ -64,6 +64,8 @@ streamlit run ui/main_app.py
 
 Se o binário do scikit-learn não puder carregar no sistema, a interface informa e usa uma regra determinística de indicadores como fallback. Esse fallback não é um modelo de IA treinado nem foi validado como estratégia rentável.
 
+No gráfico, o marcador de compra/venda mostra o **fill simulado**, que pode diferir do último fechamento usado como referência por spread e slippage (limitado por padrão a 0,10%, além do spread configurado). O hover discrimina referência, preço do fill, impacto total, slippage, taxa e custo/valor líquido. Os resultados não representam uma execução real.
+
 ### Visualização de Sinais
 
 Execute o aplicativo de visualização:

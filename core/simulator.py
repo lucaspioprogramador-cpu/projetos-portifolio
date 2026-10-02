@@ -7,6 +7,8 @@ from datetime import datetime, timezone
 
 import numpy as np
 
+DEFAULT_MAX_SLIPPAGE = 0.001  # preço pode variar no máximo 0,10% no fill simulado
+
 
 class OrderSimulator:
     """
@@ -24,7 +26,7 @@ class OrderSimulator:
         spread_pct: float = 0.0002,  # 0.02% spread bid/ask
         volatility_multiplier: float = 2.0,
         rng: np.random.Generator | None = None,
-        max_slippage: float = 0.05,
+        max_slippage: float = DEFAULT_MAX_SLIPPAGE,
     ):
         self.fee_rate = fee_rate
         self.slippage_base = slippage_base

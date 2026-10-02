@@ -19,8 +19,8 @@ class RiskTests(unittest.TestCase):
                 position_size(*args)
 
     def test_affordable_quantity_includes_cost_buffer(self):
-        qty = affordable_quantity(1_000, 100, 0.001, 0.05, 0.0002)
-        self.assertLessEqual(qty * 100 * (1 + 0.05 + 0.0001) * 1.001, 1_000)
+        qty = affordable_quantity(1_000, 100, 0.001, 0.001, 0.0002)
+        self.assertLessEqual(qty * 100 * (1 + 0.0001) * (1 + 0.001) * 1.001, 1_000)
 
     def test_affordable_quantity_rejects_unbounded_cost_inputs(self):
         for args in ((-1, 100, 0.001, 0.05), (100, 0, 0.001, 0.05), (100, 100, -0.01, 0.05)):

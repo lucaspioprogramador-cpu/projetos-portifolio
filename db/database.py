@@ -180,8 +180,8 @@ def get_trades(symbol: str = None, since: str = None) -> pd.DataFrame:
     try:
         params = []
         q = (
-            "SELECT symbol, tipo, preco_execucao, quantidade_executada, "
-            "valor_liquido, lucro, retorno, timestamp "
+            "SELECT symbol, tipo, preco_solicitado, preco_execucao, quantidade_executada, "
+            "valor_total, taxas, valor_liquido, slippage_pct, lucro, retorno, timestamp "
             "FROM trades WHERE 1=1"
         )
         if symbol:
@@ -202,8 +202,8 @@ def get_trades(symbol: str = None, since: str = None) -> pd.DataFrame:
         return pd.DataFrame()
 
     df = pd.DataFrame(rows, columns=[
-        'symbol', 'tipo', 'preco_execucao', 'quantidade_executada',
-        'valor_liquido', 'lucro', 'retorno', 'timestamp'
+        'symbol', 'tipo', 'preco_solicitado', 'preco_execucao', 'quantidade_executada',
+        'valor_total', 'taxas', 'valor_liquido', 'slippage_pct', 'lucro', 'retorno', 'timestamp'
     ])
     try:
         df['timestamp'] = pd.to_datetime(df['timestamp'])

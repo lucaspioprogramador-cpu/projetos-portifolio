@@ -16,6 +16,7 @@ from binance.client import Client
 from binance import ThreadedWebsocketManager
 from core.execution import executar_ordem_simulada, apply_simulated_fill
 from core.risk import position_size, affordable_quantity, exposure_budget
+from core.simulator import DEFAULT_MAX_SLIPPAGE
 import queue
 import os
 import json
@@ -688,7 +689,7 @@ def analisar_e_executar_trades():
                 quantidade = calcular_posicao(saldo_disponivel, preco_atual, risco_por_trade, stop_loss)
                 quantidade_caixa = affordable_quantity(
                     caixa_para_entrada, preco_atual,
-                    fee_rate=0.001, max_slippage=0.05, spread_pct=0.0002,
+                    fee_rate=0.001, max_slippage=DEFAULT_MAX_SLIPPAGE, spread_pct=0.0002,
                 )
                 quantidade = min(quantidade, quantidade_caixa)
                 valor_necessario = preco_atual * quantidade
@@ -1266,6 +1267,16 @@ if not main_df.empty:
                 _vendas  = _trades_df[_trades_df['tipo'] == 'VENDA']
 
                 if not _compras.empty:
+                    _buy_customdata = _compras[
+                        ['preco_solicitado', 'quantidade_executada', 'taxas', 'valor_liquido', 'slippage_pct']
+                    ].to_numpy()
+                    _buy_customdata = pd.DataFrame(
+                        _buy_customdata,
+                        columns=['preco_solicitado', 'quantidade', 'taxas', 'valor_liquido', 'slippage_pct'],
+                    )
+                    _buy_customdata['impacto_total'] = (
+                        _compras['preco_execucao'].to_numpy() / _compras['preco_solicitado'].to_numpy() - 1
+                    )
                     fig.add_trace(go.Scatter(
                         x=_compras['timestamp'],
                         y=_compras['preco_execucao'],
@@ -1276,14 +1287,20 @@ if not main_df.empty:
                             color='#26a69a',
                             line=dict(color='white', width=1.5),
                         ),
-                        name='Compra executada',
-                        customdata=_compras[['quantidade_executada', 'valor_liquido']].values,
+                        name='Compra simulada',
+                        customdata=_buy_customdata[
+                            ['preco_solicitado', 'quantidade', 'taxas', 'valor_liquido', 'impacto_total', 'slippage_pct']
+                        ].to_numpy(),
                         hovertemplate=(
-                            '<b>COMPRA</b><br>'
-                            '%{x}<br>'
-                            'Preco: %{y:,.2f}<br>'
-                            'Qtd: %{customdata[0]:.4f}<br>'
-                            'Valor: %{customdata[1]:,.2f}<extra></extra>'
+                            '<b>COMPRA SIMULADA</b><br>'
+                            'Horário: %{x|%d/%m/%Y %H:%M:%S}<br>'
+                            'Preço executado: %{y:,.2f}<br>'
+                            'Referência (último candle fechado): %{customdata[0]:,.2f}<br>'
+                            'Diferença total vs. referência: %{customdata[4]:.3%}<br>'
+                            'Slippage aplicado: %{customdata[5]:.3%}<br>'
+                            'Quantidade: %{customdata[1]:.6f}<br>'
+                            'Taxa: %{customdata[2]:,.4f}<br>'
+                            'Custo total: %{customdata[3]:,.2f}<extra></extra>'
                         ),
                     ), row=1, col=1)
 
@@ -1291,6 +1308,16 @@ if not main_df.empty:
                     _vdf = _vendas.copy()
                     _vdf['lucro'] = _vdf['lucro'].fillna(0)
                     _vdf['retorno'] = _vdf['retorno'].fillna(0)
+                    _sell_customdata = _vdf[
+                        ['preco_solicitado', 'quantidade_executada', 'taxas', 'valor_liquido', 'slippage_pct', 'lucro', 'retorno']
+                    ].to_numpy()
+                    _sell_customdata = pd.DataFrame(
+                        _sell_customdata,
+                        columns=['preco_solicitado', 'quantidade', 'taxas', 'valor_liquido', 'slippage_pct', 'lucro', 'retorno'],
+                    )
+                    _sell_customdata['impacto_total'] = (
+                        _vdf['preco_execucao'].to_numpy() / _vdf['preco_solicitado'].to_numpy() - 1
+                    )
                     fig.add_trace(go.Scatter(
                         x=_vdf['timestamp'],
                         y=_vdf['preco_execucao'],
@@ -1301,15 +1328,21 @@ if not main_df.empty:
                             color='#ef5350',
                             line=dict(color='white', width=1.5),
                         ),
-                        name='Venda executada',
-                        customdata=_vdf[['quantidade_executada', 'valor_liquido', 'lucro', 'retorno']].values,
+                        name='Venda simulada',
+                        customdata=_sell_customdata[
+                            ['preco_solicitado', 'quantidade', 'taxas', 'valor_liquido', 'impacto_total', 'slippage_pct', 'lucro', 'retorno']
+                        ].to_numpy(),
                         hovertemplate=(
-                            '<b>VENDA</b><br>'
-                            '%{x}<br>'
-                            'Preco: %{y:,.2f}<br>'
-                            'Qtd: %{customdata[0]:.4f}<br>'
-                            'Valor: %{customdata[1]:,.2f}<br>'
-                            'Lucro: %{customdata[2]:,.2f} (%{customdata[3]:.2f}%)<extra></extra>'
+                            '<b>VENDA SIMULADA</b><br>'
+                            'Horário: %{x|%d/%m/%Y %H:%M:%S}<br>'
+                            'Preço executado: %{y:,.2f}<br>'
+                            'Referência (último candle fechado): %{customdata[0]:,.2f}<br>'
+                            'Diferença total vs. referência: %{customdata[4]:.3%}<br>'
+                            'Slippage aplicado: %{customdata[5]:.3%}<br>'
+                            'Quantidade: %{customdata[1]:.6f}<br>'
+                            'Taxa: %{customdata[2]:,.4f}<br>'
+                            'Valor líquido: %{customdata[3]:,.2f}<br>'
+                            'Lucro líquido: %{customdata[6]:,.2f} (%{customdata[7]:.2f}%)<extra></extra>'
                         ),
                     ), row=1, col=1)
 
@@ -1369,8 +1402,8 @@ if not main_df.empty:
                                 color='#26a69a',
                                 line=dict(color='white', width=1),
                             ),
-                            name='Compra',
-                            hovertemplate='COMPRA<br>%{x}<br>%{y:,.2f}<extra></extra>',
+                            name='Sinal de compra',
+                            hovertemplate='SINAL DE COMPRA<br>%{x}<br>Fechamento: %{y:,.2f}<extra></extra>',
                         ), row=1, col=1)
 
                     if _sells:
@@ -1384,8 +1417,8 @@ if not main_df.empty:
                                 color='#ef5350',
                                 line=dict(color='white', width=1),
                             ),
-                            name='Venda',
-                            hovertemplate='VENDA<br>%{x}<br>%{y:,.2f}<extra></extra>',
+                            name='Sinal de venda',
+                            hovertemplate='SINAL DE VENDA<br>%{x}<br>Fechamento: %{y:,.2f}<extra></extra>',
                         ), row=1, col=1)
 
                 try:
